@@ -78,7 +78,7 @@ upstream at runtime. Clone the whole repo (or download a release ZIP):
 
 ```bash
 pkg update -y && pkg install -y git
-git clone https://github.com/<your-user>/lenovo-dimensity8300-termux-desktop.git
+git clone https://github.com/ppsirius/lenovo-dimensity8300-termux-desktop.git
 cd lenovo-dimensity8300-termux-desktop
 ```
 
