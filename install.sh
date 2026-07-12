@@ -109,9 +109,8 @@ spinner() {
         i=$(( (i+1) % 10 )); c=$((c+1))
         [ $((c % 50)) -eq 0 ] && [ -n "$log_file" ] && [ -s "$log_file" ] \
             && ctx=$(tail -1 "$log_file" 2>/dev/null | head -c 60)
-        printf "\r ${Y}⏳${N} ${msg} ${C}${spin:$i:1}${N}"
+        printf "\r\033[K ${Y}⏳${N} ${msg} ${C}${spin:$i:1}${N}"
         [ -n "$ctx" ] && printf " ${GR}${ctx//$'\n'/}${N}"
-        printf " "
         read -t 0.1 2>/dev/null || true
     done
     wait "$pid"; local rc=$?
@@ -121,8 +120,8 @@ spinner() {
     else
         printf "${R}✗${N} ${msg} ${R}(failed)${N}  \n"
         if [ -n "$log_file" ] && [ -f "$log_file" ] && [ -s "$log_file" ]; then
-            echo -e "${R}── last 30 lines of ${msg} ──${N}"
-            tail -30 "$log_file"
+            echo -e "${R}── full log of ${msg} ──${N}"
+            cat "$log_file"
             echo -e "${R}── end (full: $log_file) ──${N}\n"
         fi
     fi
