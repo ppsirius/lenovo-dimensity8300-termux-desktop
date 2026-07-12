@@ -108,7 +108,7 @@ spinner() {
     while kill -0 "$pid" 2>/dev/null; do
         i=$(( (i+1) % 10 ))
         printf "\r ${Y}⏳${N} ${msg} ${C}${spin:$i:1}${N} "
-        sleep 0.1
+        read -t 0.1 2>/dev/null || true
     done
     wait "$pid"; local rc=$?
     if [ $rc -eq 0 ]; then
