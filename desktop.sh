@@ -1,0 +1,97 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# =============================================================================
+#  TERMUX DESKTOP LAUNCHER  -  Mali (Dimensity) hardware acceleration
+#  Reads ~/.config/termux-desktop/desktops.conf written by install.sh.
+#
+#  Usage:
+#     desktop              # pick from installed desktops (auto if only one)
+#     desktop xfce4        # launch XFCE4 directly
+#     desktop i3           # launch i3
+#     desktop openbox      # launch Openbox
+#     desktop fluxbox      # launch Fluxbox
+# =============================================================================
+CONF="$HOME/.config/termux-desktop/desktops.conf"
+
+C='\033[0;36m'; G='\033[0;32m'; R='\033[0;31m'; Y='\033[1;33m'; W='\033[1;37m'; N='\033[0m'
+
+# --- load installed desktops -------------------------------------------------
+if [ ! -f "$CONF" ]; then
+    echo -e "${R}No desktop installed. Run the installer first.${N}"; exit 1
+fi
+IDS=(); NAMES=(); LAUNCH=()
+while IFS='|' read -r id name cmd; do
+    [ -z "$id" ] || [[ "$id" == \#* ]] && continue
+    IDS+=("$id"); NAMES+=("$name"); LAUNCH+=("$cmd")
+done < "$CONF"
+if [ ${#IDS[@]} -eq 0 ]; then
+    echo -e "${R}No desktop registered in $CONF${N}"; exit 1
+fi
+
+# --- resolve target ----------------------------------------------------------
+target="$1"
+if [ -z "$target" ]; then
+    if [ ${#IDS[@]} -eq 1 ]; then
+        target="${IDS[0]}"
+    else
+        echo -e "${W}Select desktop:${N}"
+        for i in "${!IDS[@]}"; do
+            printf "  ${C}%d${N}) %s\n" "$((i+1))" "${NAMES[$i]}"
+        done
+        read -rp "$(echo -e "${Y}>>${N} ")" n
+        if [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#IDS[@]} )); then
+            target="${IDS[$((n-1))]}"
+        else
+            echo -e "${R}Invalid choice${N}"; exit 1
+        fi
+    fi
+fi
+cmd=""
+for i in "${!IDS[@]}"; do [ "${IDS[$i]}" = "$target" ] && cmd="${LAUNCH[$i]}"; done
+[ -z "$cmd" ] && { echo -e "${R}Unknown desktop: $target${N}"; echo -e "${GR}Installed: ${IDS[*]}${N}"; exit 1; }
+
+echo -e "${Y}Starting ${W}$target${Y} with Mali HWA (Zink + Vulkan)...${N}"
+
+# --- stop any previous session ----------------------------------------------
+pkill -9 -f "termux.x11"    2>/dev/null
+pkill -9 -f "pulseaudio"    2>/dev/null
+sleep 1
+
+# --- audio (network pulseaudio + mic via SLES) ------------------------------
+pulseaudio --start \
+    --load="module-native-protocol-tcp auth-ip-acl=127.0.0.1 auth-anonymous=1" \
+    --exit-idle-time=-1
+pactl load-module module-sles-source 2>/dev/null
+
+export DISPLAY=:0
+export PULSE_SERVER=127.0.0.1
+export XDG_RUNTIME_DIR=${TMPDIR}
+
+# --- Mali / Zink / Vulkan HWA environment ------------------------------------
+export MESA_NO_ERROR=1
+export MESA_SHADER_CACHE_DISABLE=false
+export MESA_NO_WAIT_FOR_VBLANK=1
+export vblank_mode=0
+export MESA_LOADER_DRIVER_OVERRIDE=zink
+export GALLIUM_DRIVER=zink
+export ZINK_DESCRIPTORS=lazy
+export LIBGL_DRI3_ENABLE=1
+export VK_ICD_FILENAMES=/data/data/com.termux/files/usr/share/vulkan/icd.d/wrapper_icd.aarch64.json
+export WRAPPER_LOG_LEVEL=none
+export WRAPPER_CMD_LOG_LEVEL=none
+
+# --- start the X server ------------------------------------------------------
+termux-x11 :0 >/dev/null 2>&1 &
+sleep 4
+am start --user 0 -n com.termux.x11/com.termux.x11.MainActivity >/dev/null 2>&1
+sleep 2
+
+# --- launch the desktop session ---------------------------------------------
+dbus-launch --exit-with-session $cmd &
+
+# XFCE4: disable compositor vblank to avoid tearing with HWA
+if [ "$target" = "xfce4" ]; then
+    xfconf-query -c xfwm4 -p /general/vblank_mode -s "off" 2>/dev/null &
+fi
+
+echo -e "${G}Desktop started. Switch to the Termux:X11 app.${N}"
+exit 0
