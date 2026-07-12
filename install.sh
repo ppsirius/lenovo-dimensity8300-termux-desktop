@@ -526,5 +526,5 @@ echo -e "\n${GR}Tip: run 'desktop-help' for the upstream command cheat-sheet.${N
 echo -e "\n${Y}⚠ Audio troubleshooting:${N}"
 echo -e "   ${GR}1. Android Settings → Apps → Termux → Permissions → enable Microphone${N}"
 echo -e "   ${GR}2. Android Settings → Apps → Termux → Battery → set Unrestricted${N}"
-echo -e "   ${GR}3. If still no sound:${C} AUDIO_BACKEND=sles desktop${N}"
+echo -e "   ${GR}3. If still no sound:${C} desktop${N} restarts PulseAudio; check: ${C}pactl info${N}"
 exit 0

@@ -8,42 +8,27 @@ A modular shell wizard that installs a **native** Linux desktop in Termux with
 **Mali hardware acceleration** (Zink → Vulkan), and a generic launcher that
 starts any installed desktop (XFCE4, i3, Openbox, Fluxbox).
 
-- **SoC**: MediaTek Dimensity 8300 — GPU **Mali-G615 MC6** (Vulkan-capable)
-- **HWA path**: `mesa-zink` + `vulkan-wrapper-android` (auto, no manual setup)
-- **Display server**: Termux:X11 (native, not VNC)
-- **Audio**: PulseAudio over TCP + SLES microphone
-- Upstream HWA stack: [`avelith07/Termux-Desktop`](https://github.com/avelith07/Termux-Desktop) (MIT). That project is marked *unmaintained* but the build artifacts still work for Mali+Vulkan.
+Upstream HWA stack: [`avelith07/Termux-Desktop`](https://github.com/avelith07/Termux-Desktop) (MIT) — unmaintained, but build artifacts still work for Mali+Vulkan.
 
 ---
 
 ## Target Hardware (2025)
 
-This script is **purpose-built and tested for the Lenovo IdeaPad Pro 12.7 (2025)**
-tablet. Every choice below follows from the hardware — most importantly the GPU,
-which decides the whole acceleration path.
+Purpose-built for the **Lenovo IdeaPad Pro 12.7** tablet.
 
-| Component | Spec | Why it matters for this script |
-|-----------|------|--------------------------------|
-| **Device** | Lenovo IdeaPad Pro 12.7 (2025) | 12.7" tablet with keyboard — full DEs (XFCE4/LXQt) are practical, tiling WMs work well with the keyboard. |
-| **SoC** | MediaTek Dimensity 8300 (MT6897) | ARMv9-A, octa-core. Powerful enough for any DE here without CPU rasterizer fallback. |
-| **CPU** | 1× Cortex-A715 @ 3.35 GHz · 3× Cortex-A715 @ 3.20 GHz · 4× Cortex-A510 @ 2.20 GHz | 8 cores → comfortable multitasking under a full desktop. |
-| **Process** | TSMC N4P (4 nm) | Cool/efficient — the desktop can run sustained without throttling. |
-| **GPU** | **Mali-G615 MC6 @ 1400 MHz** (Valhall, ~2150 GFLOPS FP32) | The key fact: Mali + **Vulkan 1.3** support → the Zink (GL→Vulkan) + `vulkan-wrapper-android` path works, so HWA is automatic. No manual GPU setup needed. |
-| **RAM** | LPDDR5X (8 / 12 GB) | Plenty for XFCE4 + a browser + IDE simultaneously. |
-| **Storage** | UFS 3.1 (128 / 256 / 512 GB) | Fast I/O keeps `pkg install` and app launches snappy. |
-| **Display** | 12.7" high-res, 144 Hz | If the UI looks too small/big, adjust Termux:X11 *Preferences* → scaled mode (see Troubleshooting). |
+| Component | Spec |
+|-----------|------|
+| **SoC** | MediaTek Dimensity 8300 (MT6897) — TSMC N4P |
+| **CPU** | 1× Cortex-A715 @ 3.35 GHz · 3× A715 @ 3.20 GHz · 4× A510 @ 2.20 GHz |
+| **GPU** | Mali-G615 MC6 @ 1400 MHz (Valhall, Vulkan 1.3, ~2150 GFLOPS) |
+| **RAM** | LPDDR5X 8 / 12 GB |
+| **Storage** | UFS 3.1 128 / 256 / 512 GB |
+| **Display** | 12.7" 144 Hz |
 
-**What this means in practice:**
+The installer selects the Mali+Vulkan HWA path automatically. The launcher
+hard-codes the correct env vars for Mali-G615 — for other GPUs edit `desktop.sh`.
 
-- The installer selects the **Mali + Vulkan** HWA branch automatically (no GPU menu
-  to answer) — `mesa-zink` + `vulkan-wrapper-android` are installed for you.
-- The launcher (`desktop.sh`) hard-codes the Mali/Zink/Vulkan environment variables
-  that are correct for the Mali-G615. For a *different* GPU you would have to edit
-  that env block — but for this tablet it is exactly right out of the box.
-- On other hardware (Adreno, PowerVR, Mali-without-Vulkan) this script is **not**
-  correct without changes — see the upstream HWA setup guide instead.
-
-> Specs sourced from MediaTek's official Dimensity 8300 page and Wikipedia.
+[sources](https://www.mediatek.com/products/dimensity-8300)
 
 ---
 
@@ -137,13 +122,13 @@ onto an already-set-up system):
 ./install.sh --proot-distro D     # install a proot container (D = debian|arch|manjaro|fedora|alpine)
 ./install.sh --no-deps            # skip the base packages/repos step
 ./install.sh --no-bin             # skip the helper-scripts & launcher step
-./install.sh --verbose            # show live output (default: last 30 lines shown only on failure)
+./install.sh --verbose            # show live output (default: full log shown on failure)
 ./install.sh --help               # usage
 ```
 
-If a phase fails, the installer shows the **last 30 lines** of its log and
-the full log path (e.g. `/tmp/termux-install-XXXXXX.log`). Re-run with
-`--verbose` to see live output as it happens.
+If a phase fails, the installer dumps the **full log** (e.g.
+`/tmp/termux-install-XXXXXX.log`). Re-run with `--verbose` to see
+live output as it happens.
 
 ### Using newer HWA packages
 
@@ -177,9 +162,9 @@ desktop fluxbox      # launch Fluxbox
 ```
 
 The launcher (`~/bin/desktop`) sets the Mali/Zink/Vulkan environment, starts
-PulseAudio + the SLES mic source, launches `termux-x11`, then runs the chosen
-session via `dbus-launch --exit-with-session`. **Switch to the Termux:X11 app**
-to see the desktop.
+PulseAudio (AAudio output sink, SLES mic), launches `termux-x11`, then runs
+the chosen session via `dbus-launch --exit-with-session`. **Switch to the
+Termux:X11 app** to see the desktop.
 
 Other handy commands (from the upstream helper scripts):
 
@@ -291,7 +276,7 @@ numbered list (1-5) to pick the distro. Warnings are shown inline.
 
 | Problem | Fix |
 |---------|-----|
-| Phase failed / install stopped | The installer shows the last 30 lines of the failing phase's log and the full log path (`/tmp/termux-install-*.log`). Re-run with `--verbose` to see live output. |
+| Phase failed / install stopped | The installer dumps the full failing phase log (`/tmp/termux-install-*.log`). Re-run with `--verbose` for live output. |
 | Termux:X11 crashes / freezes / "signal" | See the Android tuning steps in §1; then force-stop **both** Termux and Termux:X11 and retry. |
 | Resolution too big/small | Press the Android **back** key, or leave & re-enter Termux:X11. For UI scale: open Termux:X11 *Preferences* (only when no session is running) → scaled mode. |
 | Cursor too fast/slow | Termux:X11 Preferences → enable *Capture external pointer devices* and adjust the speed factor. |
@@ -313,43 +298,19 @@ numbered list (1-5) to pick the distro. Warnings are shown inline.
 
 ### Audio / no sound
 
-> **TL;DR** — Termux `pulseaudio` ships `module-sles-sink` (output, auto-loaded),
-> `module-sles-source` (mic) and `module-aaudio-sink` (AAudio output, off by
-> default). Your sink *does* load, so "no sound" is almost always a **muted sink
-> or zero volume**, or SLES not working on your device. The launcher already
-> ensures a sink exists and unmutes it at 100% on each launch.
+The launcher starts PulseAudio and tries `module-aaudio-sink` first (Android's
+modern audio API), falling back to `module-sles-sink` if that fails. It then
+unmutes at 100%. If you hear nothing, work through these in order:
 
-**Quickest fix** (run in Termux while the desktop is up):
-
-```bash
-pactl set-sink-mute   @DEFAULT_SINK@ false
-pactl set-sink-volume @DEFAULT_SINK@ 100%
-```
-
-…then turn up the **Android media volume**. If still silent, switch the output
-backend to AAudio:
-
-```bash
-AUDIO_BACKEND=aaudio desktop          # try AAudio instead of SLES
-export AUDIO_BACKEND=aaudio           # make it permanent in ~/.bashrc
-```
-
-If neither SLES nor AAudio works, fall back to **PipeWire** (step 4 below).
-Full diagnosis & alternatives:
-
-The launcher starts PulseAudio with an OpenSL ES output sink (`module-sles-sink`)
-and unmutes it at 100%. If you still hear nothing, work through these in order:
-
-**1. Diagnose** (run these in Termux while the desktop is running):
+**1. Diagnose** (run in Termux while the desktop is up):
 
 ```bash
 pulseaudio --check && echo "PA running" || echo "PA NOT running"
-pactl list short sinks            # need at least one sink listed
+pactl list short sinks            # at least one sink needed
 pactl list short sink-inputs      # is an app actually playing?
-pactl get-sink-mute @DEFAULT_SINK@   # should print "no"
 ```
 
-- No sink listed → the SLES sink failed to load (go to step 3).
+- No sink → the AAudio/SLES backends both failed (go to step 3).
 - `PA NOT running` → `pulseaudio --kill; pulseaudio --start`, then re-launch `desktop`.
 
 **2. Volume & permissions (the most common cause):**
@@ -359,36 +320,24 @@ pactl set-sink-mute   @DEFAULT_SINK@ false
 pactl set-sink-volume @DEFAULT_SINK@ 100%
 ```
 
-Also turn up the **Android media volume** (volume keys while a video plays, or
-Settings → Sound → Media). Grant the mic permission once:
+Turn up **Android media volume**. Also grant mic permission once:
 `termux-microphone-record -d 4`.
 
-**3. Switch the output backend to AAudio** — SLES doesn't work on every device;
-AAudio (the modern Android audio API) often does. Re-launch with:
-
-```bash
-AUDIO_BACKEND=aaudio desktop
-```
-
-This unloads `module-sles-sink` and loads `module-aaudio-sink` instead. If AAudio
-works for you, you can make it permanent by adding `export AUDIO_BACKEND=aaudio`
-to `~/.bashrc`. (You can also try it manually: `pactl load-module module-aaudio-sink`.)
-
-**4. Use PipeWire instead of PulseAudio** (if neither SLES nor AAudio works):
+**3. PipeWire fallback** (if PulseAudio sinks all fail):
 
 ```bash
 pkg install pipewire pipewire-pulse pulseaudio-utils
 pulseaudio --kill
 pipewire        &
 pipewire-pulse  &
-pactl list short sinks        # check a sink appears
+pactl list short sinks
 ```
 
-`pipewire-pulse` provides a PulseAudio-compatible socket, so desktop apps keep
-working with `PULSE_SERVER=127.0.0.1`. To make this the default, edit `desktop.sh`
+`pipewire-pulse` provides a PulseAudio-compatible socket — desktop apps keep
+working with `PULSE_SERVER=127.0.0.1`. To make permanent, edit `desktop.sh`
 and replace the PulseAudio block with the two PipeWire daemons.
 
-**Quick test tone** (no app needed): `speaker-test -c2 -l1` or
+**Quick test tone:** `speaker-test -c2 -l1` or
 `paplay /system/media/audio/ui/camera_click.ogg`.
 
 ---
@@ -406,14 +355,4 @@ and replace the PulseAudio block with the two PipeWire daemons.
 
 Nothing outside this repo is fetched at install time unless you enable `USE_LATEST`.
 
-## 9. What was corrected vs. a common draft
 
-- `mesa-zink` / `mesa-zink-dev` are **not** Termux packages — they are `.deb`
-  artifacts downloaded from the upstream releases (`v23.0.4-5`). `apt install
-  mesa-zink` alone fails; this script downloads the debs first.
-- The Vulkan wrapper URL (`v25.0.0-2`) is a real upstream release.
-- `xterm` / `rxvt-unicode` are **not** in Termux, so standalone WMs (i3,
-  Openbox, Fluxbox) ship with `xfce4-terminal` as the terminal.
-- The launcher is generalized (any installed DE) instead of an XFCE4-only
-  script, and reads an install-written config so adding a DE needs no launcher
-  edit.
