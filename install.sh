@@ -63,7 +63,7 @@ HWA_LIBS="virglrenderer-mesa-zink vulkan-loader-generic angle-android virglrende
 # --- DESKTOPS REGISTRY (extend here) -----------------------------------------
 DE_IDS=(    "xfce4"                              "i3"                              "openbox"                              "fluxbox"                             )
 DE_NAMES=(  "XFCE4 - full desktop (recommended)" "i3 - tiling window manager"      "Openbox - lightweight floating WM"    "Fluxbox - lightweight stacking WM"   )
-DE_PKGS=(   "xfce4 xfce4-goodies xfce4-whiskermenu-plugin xfce4-battery-plugin xfce4-cpugraph-plugin xfce4-docklike-plugin xfce4-pulseaudio-plugin xfce4-screenshooter xfce4-taskmanager mousepad" "i3 i3status dmenu xfce4-terminal" "openbox tint2 obconf xfce4-terminal" "fluxbox xfce4-terminal" )
+DE_PKGS=(   "xfce4 xfce4-goodies xfce4-whiskermenu-plugin xfce4-battery-plugin xfce4-cpugraph-plugin xfce4-docklike-plugin xfce4-pulseaudio-plugin xfce4-screenshooter xfce4-taskmanager mousepad pavucontrol" "i3 i3status dmenu xfce4-terminal" "openbox tint2 obconf xfce4-terminal" "fluxbox xfce4-terminal" )
 DE_LAUNCH=( "xfce4-session"                      "i3"                              "openbox-session"                      "fluxbox"                             )
 
 # --- APPS REGISTRY (extend here) ---------------------------------------------
@@ -81,7 +81,7 @@ PROOT_IDS=(    "debian"                              "arch"                     
 PROOT_NAMES=(  "Debian 12 (recommended, most stable)" "Arch Linux ARM (rolling, AUR access)"        "Manjaro ARM (Arch-based, friendlier)"    "Fedora 44 (cutting-edge, may break)" "Alpine 3.23 (tiny, 10MB rootfs)"  )
 PROOT_IMAGES=( "debian:12"                            "danhunsaker/archlinuxarm:latest"            "manjarolinux/base:latest"              "fedora:44"                           "alpine:3.23"                     )
 PROOT_PKGS=(   "sudo nano dbus-x11 pulseaudio build-essential git" "sudo nano dbus-x11 pulseaudio base-devel git" "sudo nano dbus-x11 pulseaudio base-devel git" "sudo nano dbus-x11 pulseaudio gcc git make" "sudo nano dbus-x11 pulseaudio build-base git" )
-PROOT_WARN=(   ""                                     ""                                           "Keyring trust issues (#424); stale images (#480). Consider Arch instead." "dnf segfaults (#545); sudo broken (#533); filesystem upgrade fails (#525)." "musl libc; some pre-built binaries fail; no systemd." )
+PROOT_WARN=(   "Audio (Firefox/Chrome) inside proot needs PULSE_SERVER=127.0.0.1 — set it in ~/.bashrc inside the container"                                     ""                                           "Keyring trust issues (#424); stale images (#480). Consider Arch instead." "dnf segfaults (#545); sudo broken (#533); filesystem upgrade fails (#525)." "musl libc; some pre-built binaries fail; no systemd." )
 PROOT_PM=(     "apt"                                  "pacman"                                     "pacman"                                 "dnf"                                 "apk"                             )
 
 CONF_DIR="$HOME/.config/termux-desktop"
@@ -270,12 +270,15 @@ step_proot() {
     # proot-distro v5 uses OCI images; --name gives it a local alias
     proot-distro install --name "$alias" "$img"
 
+    # ponytail: firefox audio inside proot needs --shared-tmp and pulseaudio TCP forwarded
+    #           on ubuntu/debian try: pactl load-module module-native-protocol-tcp auth-ip-acl=127.0.0.1
     # run first-boot setup inside the container (package-manager-specific)
     case "$pm" in
         apt)
             proot-distro login "$alias" --shared-tmp -- /bin/bash -c "
                 apt update -y; apt upgrade -y
                 apt install -y $pkgs
+                echo 'export PULSE_SERVER=127.0.0.1' >> /root/.bashrc
                 mkdir -p /root/bin
             " ;;
         pacman)
@@ -283,18 +286,21 @@ step_proot() {
                 pacman-key --init; pacman-key --populate archlinuxarm 2>/dev/null || true
                 pacman -Syu --noconfirm
                 pacman -S --noconfirm --needed $pkgs
+                echo 'export PULSE_SERVER=127.0.0.1' >> /root/.bashrc
                 mkdir -p /root/bin
             " ;;
         dnf)
             proot-distro login "$alias" --shared-tmp -- /bin/bash -c "
                 dnf upgrade -y || true
                 dnf install -y $pkgs || true
+                echo 'export PULSE_SERVER=127.0.0.1' >> /root/.bashrc
                 mkdir -p /root/bin
             " ;;
         apk)
             proot-distro login "$alias" --shared-tmp -- /bin/sh -c "
                 apk update; apk upgrade
                 apk add $pkgs
+                echo 'export PULSE_SERVER=127.0.0.1' >> /root/.bashrc
                 mkdir -p /root/bin
             " ;;
     esac
@@ -498,4 +504,8 @@ echo -e "   ${C}desktop${N}              ${GR}# pick from installed${N}"
 echo -e "   ${C}desktop xfce4${N}        ${GR}# launch directly${N}"
 echo -e "   ${C}desktop i3${N}           ${GR}# launch i3${N}"
 echo -e "\n${GR}Tip: run 'desktop-help' for the upstream command cheat-sheet.${N}"
+echo -e "\n${Y}⚠ Audio troubleshooting:${N}"
+echo -e "   ${GR}1. Android Settings → Apps → Termux → Permissions → enable Microphone${N}"
+echo -e "   ${GR}2. Android Settings → Apps → Termux → Battery → set Unrestricted${N}"
+echo -e "   ${GR}3. If still no sound:${C} AUDIO_BACKEND=sles desktop${N}"
 exit 0
