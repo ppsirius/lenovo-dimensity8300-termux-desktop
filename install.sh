@@ -59,7 +59,6 @@ VULKAN_WRAPPER_DEB="$VENDOR_DEBS/vulkan-wrapper-android_${VULKAN_VER}_aarch64.de
 BIN_SCRIPTS=(apphwa native_cleaner proot_program termux-fastest-repo desktop-help termux-multi-instance extract)
 
 HWA_LIBS="virglrenderer-mesa-zink vulkan-loader-generic angle-android virglrenderer-android libandroid-shmem libc++ libdrm libx11 libxcb libxshmfence libwayland zlib zstd"
-BASE_PKGS="x11-repo termux-x11-nightly tur-repo termux-api pulseaudio proot-distro curl"
 
 # --- DESKTOPS REGISTRY (extend here) -----------------------------------------
 DE_IDS=(    "xfce4"                              "i3"                              "openbox"                              "fluxbox"                             )
@@ -190,8 +189,11 @@ yesno() {
 
 # ============================ STEP FUNCTIONS =================================
 step_system() {
-    pkg update -y && pkg upgrade -y
-    pkg install -y $BASE_PKGS
+    apt-get update -y
+    apt-get upgrade -y $APT_OPTS
+    pkg install -y x11-repo tur-repo
+    pkg update
+    pkg install -y termux-x11-nightly termux-api pulseaudio proot-distro curl
     termux-wake-lock
     [ "$DO_MIRROR" = 1 ] && {
         cp "$VENDOR_BIN/termux-fastest-repo" ~/termux-fastest-repo
@@ -205,7 +207,7 @@ step_hwa() {
     apt install -y $APT_OPTS $HWA_LIBS
     apt install -y $APT_OPTS "$VULKAN_WRAPPER_DEB"
     apt --fix-broken install -y $APT_OPTS
-    pkg install -y glmark2 vkmark
+    apt-get install -y $APT_OPTS glmark2 vkmark
 }
 
 step_install_desktops() {
