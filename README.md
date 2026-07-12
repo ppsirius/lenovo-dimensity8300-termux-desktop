@@ -1,5 +1,12 @@
 # Termux Desktop — Lenovo IdeaPad Pro 12.7 (Dimensity 8300)
 
+<p align="center">
+  <img src="assets/transparent-image.png" alt="Lenovo IdeaPad Pro 12.7 with keyboard" width="380">
+</p>
+
+> Transparent product render (background removed). To swap it, replace
+> `assets/lenovo-pad-pro-12.7-keyboard.png`.
+
 A modular shell wizard that installs a **native** Linux desktop in Termux with
 **Mali hardware acceleration** (Zink → Vulkan), and a generic launcher that
 starts any installed desktop (XFCE4, i3, Openbox, Fluxbox).
