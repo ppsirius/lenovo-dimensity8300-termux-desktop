@@ -104,21 +104,26 @@ VERBOSE=0
 STEP_LOG=""
 
 spinner() {
-    local pid=$1 msg=$2 log_file=$3 spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' i=0
+    local pid=$1 msg=$2 log_file=$3 spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' i=0 c=0 ctx=""
     while kill -0 "$pid" 2>/dev/null; do
-        i=$(( (i+1) % 10 ))
-        printf "\r ${Y}⏳${N} ${msg} ${C}${spin:$i:1}${N} "
+        i=$(( (i+1) % 10 )); c=$((c+1))
+        [ $((c % 50)) -eq 0 ] && [ -n "$log_file" ] && [ -s "$log_file" ] \
+            && ctx=$(tail -1 "$log_file" 2>/dev/null | head -c 60)
+        printf "\r ${Y}⏳${N} ${msg} ${C}${spin:$i:1}${N}"
+        [ -n "$ctx" ] && printf " ${GR}${ctx//$'\n'/}${N}"
+        printf " "
         read -t 0.1 2>/dev/null || true
     done
     wait "$pid"; local rc=$?
+    printf "\r%$((${#msg}+30))s\r"
     if [ $rc -eq 0 ]; then
-        printf "\r ${G}✓${N} ${msg}          \n"
+        printf "${G}✓${N} ${msg}          \n"
     else
-        printf "\r ${R}✗${N} ${msg} ${R}(failed — see log below)${N}  \n"
+        printf "${R}✗${N} ${msg} ${R}(failed)${N}  \n"
         if [ -n "$log_file" ] && [ -f "$log_file" ] && [ -s "$log_file" ]; then
-            echo -e "\n${R}── last 30 lines of ${msg} ──${N}"
+            echo -e "${R}── last 30 lines of ${msg} ──${N}"
             tail -30 "$log_file"
-            echo -e "${R}── end of log (full log: $log_file) ──${N}\n"
+            echo -e "${R}── end (full: $log_file) ──${N}\n"
         fi
     fi
     return $rc
