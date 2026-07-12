@@ -198,8 +198,12 @@ step_system() {
     apt-get install -y $APT_OPTS termux-x11-nightly termux-api pulseaudio proot-distro curl
     termux-wake-lock
     [ "$DO_MIRROR" = 1 ] && {
-        cp "$VENDOR_BIN/termux-fastest-repo" ~/termux-fastest-repo
-        chmod +x ~/termux-fastest-repo; ~/termux-fastest-repo; rm -f ~/termux-fastest-repo
+        cat > "$PREFIX/etc/apt/sources.list" <<-EOF
+deb https://packages.termux.dev/apt/termux-main stable main
+deb https://grimler.se/termux stable main
+deb https://termux.netmirror.org stable main
+EOF
+        apt-get update -y
     }
 }
 
