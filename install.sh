@@ -67,9 +67,9 @@ DE_PKGS=(   "xfce4 xfce4-goodies xfce4-whiskermenu-plugin xfce4-battery-plugin x
 DE_LAUNCH=( "xfce4-session"                      "i3"                              "openbox-session"                      "fluxbox"                             )
 
 # --- APPS REGISTRY (extend here) ---------------------------------------------
-APP_IDS=(   "firefox"   "chromium"  "vlc"   "mpv"   "code-oss"      "geany" )
-APP_NAMES=( "Firefox"   "Chromium"   "VLC"   "MPV"   "VS Code (code-oss)" "Geany" )
-APP_PKGS=(  "firefox"   "chromium"   "vlc-qt" "mpv"  "code-oss"      "geany" )
+APP_IDS=(   "opencode"  "firefox"   "chromium"  "vlc"   "mpv"   "code-oss"      "geany" )
+APP_NAMES=( "OpenCode (AI coding agent)" "Firefox" "Chromium" "VLC"   "MPV"   "VS Code (code-oss)" "Geany" )
+APP_PKGS=(  ""          "firefox"   "chromium"  "vlc-qt" "mpv"  "code-oss"      "geany" )
 
 # --- PROOT DISTROS REGISTRY (extend here) ------------------------------------
 # PD_ALIAS : proot-distro alias / image name for `proot-distro install`
@@ -260,7 +260,13 @@ step_install_apps() {
     local id i
     for id in "${SEL_APP[@]}"; do
         for i in "${!APP_IDS[@]}"; do
-            [[ "${APP_IDS[$i]}" == "$id" ]] && pkg install -y $APT_OPTS ${APP_PKGS[$i]}
+            if [[ "${APP_IDS[$i]}" == "$id" ]]; then
+                if [ -z "${APP_PKGS[$i]}" ]; then
+                    curl -fsSL https://raw.githubusercontent.com/retired64/opencode-termux/main/install.sh | bash
+                else
+                    pkg install -y $APT_OPTS ${APP_PKGS[$i]}
+                fi
+            fi
         done
     done
 }
