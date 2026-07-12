@@ -8,7 +8,7 @@ A modular shell wizard that installs a **native** Linux desktop in Termux with
 **Mali hardware acceleration** (Zink → Vulkan), and a generic launcher that
 starts any installed desktop (XFCE4, i3, Openbox, Fluxbox).
 
-Upstream HWA stack: [`avelith07/Termux-Desktop`](https://github.com/avelith07/Termux-Desktop) (MIT) — unmaintained, but build artifacts still work for Mali+Vulkan.
+Based on [`avelith07/Termux-Desktop`](https://github.com/avelith07/Termux-Desktop) (MIT) — unmaintained upstream whose HWA build artifacts work for Mali+Vulkan and are vendored in `vendor/`.
 
 ---
 
