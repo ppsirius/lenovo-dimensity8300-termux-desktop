@@ -1,4 +1,4 @@
-# Termux Desktop — Lenovo IdeaPad Pro 12.7 (Dimensity 8300)
+# Termux Desktop — Lenovo IdeaPad Pro 12.7 (Mediatek Dimensity 8300)
 
 <p align="center">
   <img src="assets/transparent-image.png" alt="Lenovo IdeaPad Pro 12.7 with keyboard" width="380">
@@ -101,7 +101,7 @@ The wizard will:
 3. Install the **Mali HWA stack** (mesa-zink debs + Vulkan wrapper + Zink libs + `glmark2`/`vkmark`).
 4. Ask which **desktop(s)** to install — XFCE4, i3, Openbox, Fluxbox (pick one, several, or all).
 5. Ask which **apps** to install — Firefox, Chromium, VLC, MPV, VS Code, Geany (skippable).
-6. Optionally install a **Debian PRoot** container for broader package compatibility.
+6. Optionally install a **PRoot container** (Debian, Arch, Manjaro, Fedora, or Alpine) for broader package compatibility.
 7. Drop helper scripts + the `desktop` launcher into `~/bin` and add it to `PATH`.
 
 Each phase shows a spinner and a progress bar. Failures are reported but do not abort the whole run.
@@ -114,6 +114,12 @@ Skip all prompts and install with defaults (XFCE4, no apps, no PRoot):
 ./install.sh -y
 ```
 
+Include a PRoot container in non-interactive mode:
+
+```bash
+./install.sh -y --proot-distro debian     # or arch, manjaro, fedora, alpine
+```
+
 Combine with step-skips to run only what you need (e.g. re-install just the desktop
 onto an already-set-up system):
 
@@ -124,13 +130,14 @@ onto an already-set-up system):
 ### Useful flags
 
 ```bash
-./install.sh --selftest   # validate registries AND that vendor/ files are present
-./install.sh --list       # list available desktops
-./install.sh --sync       # refresh ./vendor from upstream (uses the tag vars), then exit
-./install.sh -y|--yes     # non-interactive (defaults: XFCE4, no apps/proot/mirror)
-./install.sh --no-deps    # skip the base packages/repos step
-./install.sh --no-bin     # skip the helper-scripts & launcher step
-./install.sh --help       # usage
+./install.sh --selftest           # validate registries AND that vendor/ files are present
+./install.sh --list               # list available desktops AND proot distros
+./install.sh --sync               # refresh ./vendor from upstream (uses the tag vars), then exit
+./install.sh -y|--yes             # non-interactive (defaults: XFCE4, no apps/proot/mirror)
+./install.sh --proot-distro D     # install a proot container (D = debian|arch|manjaro|fedora|alpine)
+./install.sh --no-deps            # skip the base packages/repos step
+./install.sh --no-bin             # skip the helper-scripts & launcher step
+./install.sh --help               # usage
 ```
 
 ### Using newer HWA packages
@@ -218,7 +225,64 @@ registry for every desktop you select.
 
 ---
 
-## 6. Troubleshooting
+## 6. PRoot distros
+
+The installer supports five PRoot containers. The interactive wizard shows
+all options with warnings for problematic distros.
+
+| Alias | Image | Package manager | Status | Notes |
+|-------|-------|-----------------|--------|-------|
+| `debian` | `debian:12` | apt | **Recommended** | Most stable under proot; huge aarch64 repo; no symlink/cpio issues. |
+| `arch` | `danhunsaker/archlinuxarm:latest` | pacman | Good | Rolling release; AUR access; `base-devel` included. |
+| `manjaro` | `manjarolinux/base:latest` | pacman | ⚠ Unstable | Keyring trust issues ([#424](https://github.com/termux/proot-distro/issues/424)); stale images ([#480](https://github.com/termux/proot-distro/issues/480)). Consider Arch instead. |
+| `fedora` | `fedora:44` | dnf | ⚠ Unstable | dnf segfaults ([#545](https://github.com/termux/proot-distro/issues/545)); sudo broken after updates ([#533](https://github.com/termux/proot-distro/issues/533)); filesystem package upgrade fails ([#525](https://github.com/termux/proot-distro/issues/525)). |
+| `alpine` | `alpine:3.23` | apk | ⚠ Caveats | Tiny (10 MB rootfs, 50 MB installed). Uses musl libc — some pre-built binaries (Node.js, VS Code, JetBrains) will not run. No systemd. |
+
+**CLI usage:**
+
+```bash
+./install.sh -y --proot-distro arch      # non-interactive: install Arch container
+./install.sh -y --proot-distro fedora    # non-interactive: install Fedora container
+```
+
+**Interactive wizard:** When answering "yes" to the PRoot prompt, you get a
+numbered list (1-5) to pick the distro. Warnings are shown inline.
+
+### Manjaro under proot — known issues
+
+- **Keyring trust**: The Manjaro ARM rootfs ships with a stale `manjaro-arm-keyring`.
+  After first login, run `pacman-key --init && pacman-key --populate manjaro-arm`
+  and then `pacman -Syu` to fix.
+- **Stale images**: Docker Hub `manjarolinux/base` may lag behind current Arch ARM
+  packages. Pin to a specific tag (e.g. `manjarolinux/base:20260322`) to avoid
+  surprises.
+- **No advantage over Arch**: In a proot context, Manjaro ARM offers no benefit over
+  Arch Linux ARM (`danhunsaker/archlinuxarm`). Arch has more reliable keyring
+  maintenance and the same package ecosystem. **Use Arch instead.**
+
+### Fedora under proot — known issues
+
+- **dnf segfaults**: proot's ptrace-based syscall interception breaks RPM/dnf
+  operations. Upgrade proot to the latest version (`pkg upgrade proot`) and try
+  again. If segfaults persist, this is an upstream proot bug.
+- **sudo broken**: Fedora 42+ `sudo` fails with "no new privileges" flag — proot
+  sets `PR_SET_NO_NEW_PRIVS` which conflicts. Workaround: run as root inside
+  the container (proot-distro logs in as root by default).
+- **filesystem package**: The `filesystem` package upgrade fails with "symlink
+  failed — Directory not empty" due to `/bin → /usr/bin` and proot's symlink
+  handling. Use a pinned Docker Hub tag with a recent build (e.g. `fedora:44`).
+
+### Alpine under proot — known issues
+
+- **musl libc**: Alpine uses musl instead of glibc. Pre-built binaries from most
+  Linux repos (Node.js, VS Code, JetBrains, Python wheels) will not work.
+  You'll need to build from source or use Alpine's own packages.
+- **No systemd**: Same as all proot distros — systemd requires PID 1 and cgroups,
+  neither of which work under proot.
+
+---
+
+## 7. Troubleshooting
 
 | Problem | Fix |
 |---------|-----|
@@ -323,7 +387,7 @@ and replace the PulseAudio block with the two PipeWire daemons.
 
 ---
 
-## 7. Files
+## 8. Files
 
 | Path | Purpose |
 |------|---------|
@@ -336,7 +400,7 @@ and replace the PulseAudio block with the two PipeWire daemons.
 
 Nothing outside this repo is fetched at install time unless you enable `USE_LATEST`.
 
-## 8. What was corrected vs. a common draft
+## 9. What was corrected vs. a common draft
 
 - `mesa-zink` / `mesa-zink-dev` are **not** Termux packages — they are `.deb`
   artifacts downloaded from the upstream releases (`v23.0.4-5`). `apt install

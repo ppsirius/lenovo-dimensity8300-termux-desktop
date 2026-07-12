@@ -10,13 +10,14 @@
 #  ADD AN APP    : append one entry to each APP_* array.
 #  No other code needs to change.
 #
-#  Flags:  --selftest   validate registries & vendored files, then exit
-#          --list       list available desktops & exit
-#          --sync       refresh ./vendor from upstream (uses tag vars) & exit
-#          -y, --yes    non-interactive (defaults: XFCE4, no apps/proot/mirror)
-#          --no-deps    skip the base packages/repos step
-#          --no-bin     skip the helper-scripts & launcher step
-#          --help       show usage
+#  Flags:  --selftest       validate registries & vendored files, then exit
+#          --list           list available desktops & exit
+#          --sync           refresh ./vendor from upstream (uses tag vars) & exit
+#          -y, --yes        non-interactive (defaults: XFCE4, no apps/proot/mirror)
+#          --proot-distro D also install a proot container (D = debian|arch|manjaro|fedora|alpine)
+#          --no-deps        skip the base packages/repos step
+#          --no-bin         skip the helper-scripts & launcher step
+#          --help           show usage
 # =============================================================================
 #
 #  Package source: by default uses files vendored in ./vendor (pinned, offline).
@@ -69,6 +70,19 @@ DE_LAUNCH=( "xfce4-session"                      "i3"                           
 APP_IDS=(   "firefox"   "chromium"  "vlc"   "mpv"   "code-oss"      "geany" )
 APP_NAMES=( "Firefox"   "Chromium"   "VLC"   "MPV"   "VS Code (code-oss)" "Geany" )
 APP_PKGS=(  "firefox"   "chromium"   "vlc-qt" "mpv"  "code-oss"      "geany" )
+
+# --- PROOT DISTROS REGISTRY (extend here) ------------------------------------
+# PD_ALIAS : proot-distro alias / image name for `proot-distro install`
+# PD_NAME  : display name
+# PD_PKGS  : packages to install inside the container (space-separated)
+# PD_WARN  : known-issue warning (shown in wizard; empty = no warning)
+# ponytail: registry not a class hierarchy — arrays, not objects
+PROOT_IDS=(    "debian"                              "arch"                                       "manjaro"                               "fedora"                              "alpine"                          )
+PROOT_NAMES=(  "Debian 12 (recommended, most stable)" "Arch Linux ARM (rolling, AUR access)"        "Manjaro ARM (Arch-based, friendlier)"    "Fedora 44 (cutting-edge, may break)" "Alpine 3.23 (tiny, 10MB rootfs)"  )
+PROOT_IMAGES=( "debian:12"                            "danhunsaker/archlinuxarm:latest"            "manjarolinux/base:latest"              "fedora:44"                           "alpine:3.23"                     )
+PROOT_PKGS=(   "sudo nano dbus-x11 pulseaudio build-essential git" "sudo nano dbus-x11 pulseaudio base-devel git" "sudo nano dbus-x11 pulseaudio base-devel git" "sudo nano dbus-x11 pulseaudio gcc git make" "sudo nano dbus-x11 pulseaudio build-base git" )
+PROOT_WARN=(   ""                                     ""                                           "Keyring trust issues (#424); stale images (#480). Consider Arch instead." "dnf segfaults (#545); sudo broken (#533); filesystem upgrade fails (#525)." "musl libc; some pre-built binaries fail; no systemd." )
+PROOT_PM=(     "apt"                                  "pacman"                                     "pacman"                                 "dnf"                                 "apk"                             )
 
 CONF_DIR="$HOME/.config/termux-desktop"
 DESKTOPS_CONF="$CONF_DIR/desktops.conf"
@@ -205,12 +219,45 @@ step_helpers() {
 }
 
 step_proot() {
-    proot-distro install debian
-    proot-distro login debian --shared-tmp -- /bin/bash <<'EOF'
-apt update -y; apt upgrade -y
-apt install -y sudo nano dbus-x11 adduser pulseaudio
-mkdir -p "$HOME/bin"
-EOF
+    local idx=-1 i
+    for i in "${!PROOT_IDS[@]}"; do
+        [ "${PROOT_IDS[$i]}" = "$SEL_PROOT" ] && idx=$i && break
+    done
+    [ $idx -ge 0 ] || { echo -e "${R}Unknown proot distro: $SEL_PROOT${N}"; return 1; }
+
+    local img="${PROOT_IMAGES[$idx]}" pm="${PROOT_PM[$idx]}" pkgs="${PROOT_PKGS[$idx]}"
+    local alias="${PROOT_IDS[$idx]}"
+    # proot-distro v5 uses OCI images; --name gives it a local alias
+    proot-distro install --name "$alias" "$img"
+
+    # run first-boot setup inside the container (package-manager-specific)
+    case "$pm" in
+        apt)
+            proot-distro login "$alias" --shared-tmp -- /bin/bash -c "
+                apt update -y; apt upgrade -y
+                apt install -y $pkgs
+                mkdir -p /root/bin
+            " ;;
+        pacman)
+            proot-distro login "$alias" --shared-tmp -- /bin/bash -c "
+                pacman-key --init; pacman-key --populate archlinuxarm 2>/dev/null || true
+                pacman -Syu --noconfirm
+                pacman -S --noconfirm --needed $pkgs
+                mkdir -p /root/bin
+            " ;;
+        dnf)
+            proot-distro login "$alias" --shared-tmp -- /bin/bash -c "
+                dnf upgrade -y || true
+                dnf install -y $pkgs || true
+                mkdir -p /root/bin
+            " ;;
+        apk)
+            proot-distro login "$alias" --shared-tmp -- /bin/sh -c "
+                apk update; apk upgrade
+                apk add $pkgs
+                mkdir -p /root/bin
+            " ;;
+    esac
 }
 
 # ============================ SYNC VENDOR =====================================
@@ -245,6 +292,13 @@ selftest() {
     local na=${#APP_IDS[@]}
     [ ${#APP_NAMES[@]} -eq $na ] || { echo "APP_NAMES length != APP_IDS"; err=1; }
     [ ${#APP_PKGS[@]}  -eq $na ] || { echo "APP_PKGS length != APP_IDS";  err=1; }
+    # proot distro registry
+    local np=${#PROOT_IDS[@]}
+    [ ${#PROOT_NAMES[@]} -eq $np ] || { echo "PROOT_NAMES length != PROOT_IDS"; err=1; }
+    [ ${#PROOT_IMAGES[@]} -eq $np ] || { echo "PROOT_IMAGES length != PROOT_IDS"; err=1; }
+    [ ${#PROOT_PKGS[@]} -eq $np ]   || { echo "PROOT_PKGS length != PROOT_IDS"; err=1; }
+    [ ${#PROOT_PM[@]} -eq $np ]     || { echo "PROOT_PM length != PROOT_IDS"; err=1; }
+    [ ${#PROOT_WARN[@]} -eq $np ]   || { echo "PROOT_WARN length != PROOT_IDS"; err=1; }
     # vendored files must be present when not fetching latest
     if [ "$USE_LATEST" = 0 ]; then
         for f in "$MESA_ZINK_DEB" "$MESA_ZINK_DEV_DEB" "$VULKAN_WRAPPER_DEB"; do
@@ -254,7 +308,7 @@ selftest() {
             [ -f "$VENDOR_BIN/$s" ] || { echo "missing vendor script: $s"; err=1; }
         done
     fi
-    [ $err -eq 0 ] && echo -e "${G}selftest OK${N} - $n desktops, $na apps registered, vendor OK"
+    [ $err -eq 0 ] && echo -e "${G}selftest OK${N} - $n desktops, $na apps, $np proot distros, vendor OK"
     return $err
 }
 
@@ -265,26 +319,46 @@ list_desktops() {
     done
 }
 
+list_proot_distros() {
+    echo -e "${C}${B}Available proot distros:${N}"
+    for i in "${!PROOT_IDS[@]}"; do
+        printf "  ${G}%-10s${N} %s" "${PROOT_IDS[$i]}" "${PROOT_NAMES[$i]}"
+        [ -n "${PROOT_WARN[$i]}" ] && printf "  ${R}⚠ %s${N}" "${PROOT_WARN[$i]}"
+        echo
+    done
+}
+
 usage() {
     sed -n '2,20p' "$0"
 }
 
 # ============================ MAIN ===========================================
 ASSUME_YES=0; SKIP_DEPS=0; SKIP_BIN=0
+CLI_PROOT_DISTRO=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --selftest) selftest; exit $?;;
-        --list)     list_desktops; exit 0;;
+        --list)     list_desktops; list_proot_distros; exit 0;;
         --sync)     echo -e "${Y}Refreshing vendored files from upstream...${N}"
                     sync_vendor; echo -e "${G}Done.${N}"; exit 0;;
         --help|-h)  usage; exit 0;;
         -y|--yes)   ASSUME_YES=1; shift;;
+        --proot-distro) CLI_PROOT_DISTRO="$2"; shift 2;;
         --no-deps)  SKIP_DEPS=1; shift;;
         --no-bin)   SKIP_BIN=1; shift;;
         *) echo -e "${R}Unknown flag: $1${N}"; usage; exit 1;;
     esac
 done
+
+# validate CLI proot distro flag, if given
+SEL_PROOT=""
+if [ -n "$CLI_PROOT_DISTRO" ]; then
+    found=0
+    for d in "${PROOT_IDS[@]}"; do [ "$d" = "$CLI_PROOT_DISTRO" ] && found=1 && break; done
+    [ $found -eq 1 ] || { echo -e "${R}Unknown proot distro: $CLI_PROOT_DISTRO${N}"; list_proot_distros; exit 1; }
+    SEL_PROOT="$CLI_PROOT_DISTRO"
+fi
 
 banner
 
@@ -297,8 +371,12 @@ echo -e "${GR}HWA stack: $UPSTREAM (MIT). Upstream is unmaintained but functiona
 [ "$USE_LATEST" = 1 ] && sync_vendor
 
 if [ "$ASSUME_YES" = 1 ]; then
-    echo -e "${Y}Non-interactive mode (-y): defaults = XFCE4, no apps, no PRoot, no mirror.${N}\n"
-    SEL_DE=("xfce4"); SEL_APP=(); DO_MIRROR=0; DO_PROOT=0
+    if [ -n "$SEL_PROOT" ]; then
+        echo -e "${Y}Non-interactive mode (-y): defaults = XFCE4, no apps, PRoot=${SEL_PROOT}, no mirror.${N}\n"
+    else
+        echo -e "${Y}Non-interactive mode (-y): defaults = XFCE4, no apps, no PRoot, no mirror.${N}\n"
+    fi
+    SEL_DE=("xfce4"); SEL_APP=(); DO_MIRROR=0
 else
     DO_MIRROR=0; yesno "Optimize package mirrors first (needs a keypress)?" && DO_MIRROR=1
 
@@ -318,8 +396,34 @@ else
     SEL_APP=("${SELECTED[@]}")
     [ ${#SEL_APP[@]} -gt 0 ] && echo -e "${G}Apps:${N} ${SEL_APP[*]}\n"
 
-    # --- proot (optional) ---
-    DO_PROOT=0; yesno "Install Debian PRoot container (for broader app compat)?" && DO_PROOT=1
+    # --- proot distro selection (optional) ---
+    if [ -z "$SEL_PROOT" ]; then
+        echo -e "${C}Install a PRoot container? (for broader app compat, LLM dev tools, etc.)${N}"
+        echo -e "${GR}Available distros:${N}"
+        for i in "${!PROOT_IDS[@]}"; do
+            printf "  ${C}%d${N}) ${G}%-10s${N} %s" "$((i+1))" "${PROOT_IDS[$i]}" "${PROOT_NAMES[$i]}"
+            [ -n "${PROOT_WARN[$i]}" ] && printf " ${R}⚠${N}" || true
+            echo
+        done
+        echo -e "  ${GR}(1-5 to pick · 's' = skip)${N}"
+        read -rp "$(echo -e "${Y}>>${N} ")" pc
+        case "$pc" in
+            s|S|"") SEL_PROOT="" ;;
+            *)
+                if [[ "$pc" =~ ^[1-5]$ ]] && [ $pc -le ${#PROOT_IDS[@]} ]; then
+                    SEL_PROOT="${PROOT_IDS[$((pc-1))]}"
+                    [ -n "${PROOT_WARN[$((pc-1))]}" ] && \
+                        echo -e "${R}⚠ ${PROOT_WARN[$((pc-1))]}${N}"
+                    echo -e "${G}PRoot distro:${N} ${SEL_PROOT}\n"
+                else
+                    echo -e "${R}Invalid choice, skipping PRoot.${N}\n"
+                    SEL_PROOT=""
+                fi
+                ;;
+        esac
+    else
+        echo -e "${G}PRoot distro (from CLI):${N} ${SEL_PROOT}\n"
+    fi
 fi
 
 # --- build the step list (accurate progress) ---
@@ -329,7 +433,7 @@ steps_label+=("Hardware acceleration (Mali/Zink/Vulkan)"); steps_fn+=(step_hwa)
 steps_label+=("Desktop environment(s)");               steps_fn+=(step_install_desktops)
 [ ${#SEL_APP[@]} -gt 0 ] && { steps_label+=("Applications"); steps_fn+=(step_install_apps); }
 [ "$SKIP_BIN" = 0 ]  && { steps_label+=("Helper scripts & launcher"); steps_fn+=(step_helpers); }
-[ "$DO_PROOT" = 1 ]  && { steps_label+=("Debian PRoot container"); steps_fn+=(step_proot); }
+[ -n "$SEL_PROOT" ]  && { steps_label+=("${SEL_PROOT^} PRoot container"); steps_fn+=(step_proot); }
 
 TOTAL=${#steps_fn[@]}
 echo -e "${C}Running ${TOTAL} phases. Sit back.${N}\n"
