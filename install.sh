@@ -200,6 +200,15 @@ step_system() {
     apt-get install -y $APT_OPTS x11-repo tur-repo
     apt-get update -y
     apt-get install -y $APT_OPTS termux-x11-nightly termux-api pulseaudio proot-distro curl
+    # PulseAudio: dopasuj do natywnego 48kHz Androida, bez resamplingu
+    cat > "$PREFIX/etc/pulse/daemon.conf" <<-EOF
+default-sample-rate = 48000
+alternate-sample-rate = 44100
+default-sample-format = s16le
+resample-method = speex-float-1
+default-fragments = 4
+default-fragment-size-msec = 25
+EOF
     termux-wake-lock
     [ "$DO_MIRROR" = 1 ] && {
         cat > "$PREFIX/etc/apt/sources.list" <<-EOF
@@ -247,6 +256,14 @@ step_helpers() {
     mkdir -p ~/bin
     cp "$VENDOR_BIN"/* ~/bin/
     chmod +x ~/bin/*
+
+    # wrapper for pavucontrol (XFCE4 panel plugin traci PULSE_SERVER bez shella)
+    cat > ~/bin/pavucontrol << 'PULSE_WRAPPER'
+#!/data/data/com.termux/files/usr/bin/bash
+export PULSE_SERVER=127.0.0.1
+exec /data/data/com.termux/files/usr/bin/pavucontrol "$@"
+PULSE_WRAPPER
+    chmod +x ~/bin/pavucontrol
 
     # the generic desktop launcher (lives next to install.sh)
     cp "$SCRIPT_DIR/desktop.sh" ~/bin/desktop
