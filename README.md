@@ -137,8 +137,13 @@ onto an already-set-up system):
 ./install.sh --proot-distro D     # install a proot container (D = debian|arch|manjaro|fedora|alpine)
 ./install.sh --no-deps            # skip the base packages/repos step
 ./install.sh --no-bin             # skip the helper-scripts & launcher step
+./install.sh --verbose            # show live output (default: last 30 lines shown only on failure)
 ./install.sh --help               # usage
 ```
+
+If a phase fails, the installer shows the **last 30 lines** of its log and
+the full log path (e.g. `/tmp/termux-install-XXXXXX.log`). Re-run with
+`--verbose` to see live output as it happens.
 
 ### Using newer HWA packages
 
@@ -286,6 +291,7 @@ numbered list (1-5) to pick the distro. Warnings are shown inline.
 
 | Problem | Fix |
 |---------|-----|
+| Phase failed / install stopped | The installer shows the last 30 lines of the failing phase's log and the full log path (`/tmp/termux-install-*.log`). Re-run with `--verbose` to see live output. |
 | Termux:X11 crashes / freezes / "signal" | See the Android tuning steps in §1; then force-stop **both** Termux and Termux:X11 and retry. |
 | Resolution too big/small | Press the Android **back** key, or leave & re-enter Termux:X11. For UI scale: open Termux:X11 *Preferences* (only when no session is running) → scaled mode. |
 | Cursor too fast/slow | Termux:X11 Preferences → enable *Capture external pointer devices* and adjust the speed factor. |

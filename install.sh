@@ -17,6 +17,7 @@
 #          --proot-distro D also install a proot container (D = debian|arch|manjaro|fedora|alpine)
 #          --no-deps        skip the base packages/repos step
 #          --no-bin         skip the helper-scripts & launcher step
+#          --verbose        show live output during install (default: show on failure only)
 #          --help           show usage
 # =============================================================================
 #
@@ -93,20 +94,40 @@ R='\033[0;31m'; G='\033[0;32m'; Y='\033[1;33m'; C='\033[0;36m'
 W='\033[1;37m'; GR='\033[0;90m'; B='\033[1m'; N='\033[0m'
 
 # ----------------------------- spinner ---------------------------------------
+VERBOSE=0
+STEP_LOG=""
+
 spinner() {
-    local pid=$1 msg=$2 spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' i=0
+    local pid=$1 msg=$2 log_file=$3 spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' i=0
     while kill -0 "$pid" 2>/dev/null; do
         i=$(( (i+1) % 10 ))
         printf "\r ${Y}⏳${N} ${msg} ${C}${spin:$i:1}${N} "
         sleep 0.1
     done
     wait "$pid"; local rc=$?
-    if [ $rc -eq 0 ]; then printf "\r ${G}✓${N} ${msg}          \n"
-    else                 printf "\r ${R}✗${N} ${msg} ${R}(failed)${N}  \n"; fi
+    if [ $rc -eq 0 ]; then
+        printf "\r ${G}✓${N} ${msg}          \n"
+    else
+        printf "\r ${R}✗${N} ${msg} ${R}(failed — see log below)${N}  \n"
+        if [ -n "$log_file" ] && [ -f "$log_file" ] && [ -s "$log_file" ]; then
+            echo -e "\n${R}── last 30 lines of ${msg} ──${N}"
+            tail -30 "$log_file"
+            echo -e "${R}── end of log (full log: $log_file) ──${N}\n"
+        fi
+    fi
     return $rc
 }
 
-run_step() { local msg="$1"; shift; ( "$@" ) >/dev/null 2>&1 & spinner $! "$msg"; }
+run_step() {
+    local msg="$1"; shift
+    STEP_LOG=$(mktemp "${TMPDIR:-/tmp}/termux-install-XXXXXX.log")
+    if [ "$VERBOSE" = 1 ]; then
+        ( "$@" ) 2>&1 | tee "$STEP_LOG" &
+    else
+        ( "$@" ) >"$STEP_LOG" 2>&1 &
+    fi
+    spinner $! "$msg" "$STEP_LOG"
+}
 
 show_progress() {
     local cur=$1 total=$2 label=$3
@@ -347,6 +368,7 @@ while [ $# -gt 0 ]; do
         --proot-distro) CLI_PROOT_DISTRO="$2"; shift 2;;
         --no-deps)  SKIP_DEPS=1; shift;;
         --no-bin)   SKIP_BIN=1; shift;;
+        --verbose)  VERBOSE=1; shift;;
         *) echo -e "${R}Unknown flag: $1${N}"; usage; exit 1;;
     esac
 done
@@ -427,6 +449,7 @@ else
 fi
 
 # --- build the step list (accurate progress) ---
+STEP_FAILED=0
 steps_label=(); steps_fn=()
 [ "$SKIP_DEPS" = 0 ] && { steps_label+=("System update, repos & base packages"); steps_fn+=(step_system); }
 steps_label+=("Hardware acceleration (Mali/Zink/Vulkan)"); steps_fn+=(step_hwa)
@@ -440,8 +463,11 @@ echo -e "${C}Running ${TOTAL} phases. Sit back.${N}\n"
 
 for i in "${!steps_fn[@]}"; do
     show_progress $((i+1)) "$TOTAL" "${steps_label[$i]}"
-    run_step "${steps_label[$i]}" "${steps_fn[$i]}" || echo -e "${Y}  (continued despite warning)${N}"
+    run_step "${steps_label[$i]}" "${steps_fn[$i]}" || { STEP_FAILED=1; echo -e "${Y}  (continued despite warning)${N}"; }
 done
+
+# --- cleanup log files on full success ---
+[ "$STEP_FAILED" = 0 ] && rm -f /tmp/termux-install-*.log 2>/dev/null
 
 # --- done ---
 echo
