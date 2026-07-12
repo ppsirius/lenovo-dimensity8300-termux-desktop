@@ -205,6 +205,7 @@ step_system() {
         cat > "$PREFIX/etc/apt/sources.list" <<-EOF
 deb https://packages.termux.dev/apt/termux-main stable main
 deb https://grimler.se/termux stable main
+deb https://ftp.fau.de/termux stable main
 deb https://termux.netmirror.org stable main
 EOF
         apt-get update -y
