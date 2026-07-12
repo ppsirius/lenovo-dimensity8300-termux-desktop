@@ -104,12 +104,13 @@ VERBOSE=0
 STEP_LOG=""
 
 spinner() {
-    local pid=$1 msg=$2 log_file=$3 spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' i=0 c=0 ctx=""
+    local pid=$1 msg=$2 log_file=$3 i=0 c=0 ctx=""
+    local spin=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
     while kill -0 "$pid" 2>/dev/null; do
         i=$(( (i+1) % 10 )); c=$((c+1))
         [ $((c % 50)) -eq 0 ] && [ -n "$log_file" ] && [ -s "$log_file" ] \
             && ctx=$(tail -1 "$log_file" 2>/dev/null | head -c 60)
-        printf "\r\033[K ${Y}⏳${N} ${msg} ${C}${spin:$i:1}${N}"
+        printf "\r\033[K ${Y}⏳${N} ${msg} ${C}${spin[$i]}${N}"
         [ -n "$ctx" ] && printf " ${GR}${ctx//$'\n'/}${N}"
         read -t 0.1 2>/dev/null || true
     done
