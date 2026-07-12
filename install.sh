@@ -191,9 +191,11 @@ yesno() {
 step_system() {
     apt-get update -y
     apt-get upgrade -y $APT_OPTS
-    pkg install -y x11-repo tur-repo
-    pkg update
-    pkg install -y termux-x11-nightly termux-api pulseaudio proot-distro curl
+    # naprawia przejściowe braki bibliotek po upgrade (libpcre2.so, etc.)
+    apt-get --fix-broken install -y $APT_OPTS
+    apt-get install -y $APT_OPTS x11-repo tur-repo
+    apt-get update -y
+    apt-get install -y $APT_OPTS termux-x11-nightly termux-api pulseaudio proot-distro curl
     termux-wake-lock
     [ "$DO_MIRROR" = 1 ] && {
         cp "$VENDOR_BIN/termux-fastest-repo" ~/termux-fastest-repo
