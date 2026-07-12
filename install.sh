@@ -89,6 +89,13 @@ CONF_DIR="$HOME/.config/termux-desktop"
 DESKTOPS_CONF="$CONF_DIR/desktops.conf"
 # ============================ /CONFIG =========================================
 
+# --- Force non-interactive apt/dpkg (no config file prompts) -----------------
+# Without this, dpkg may block on "What would you like to do about it?" for
+# config file conflicts (e.g. openssl), killing the installer on stdin EOF.
+export DEBIAN_FRONTEND=noninteractive
+export DEBCONF_NONINTERACTIVE_SEEN=true
+APT_OPTS="-o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
+
 # ----------------------------- colors ----------------------------------------
 R='\033[0;31m'; G='\033[0;32m'; Y='\033[1;33m'; C='\033[0;36m'
 W='\033[1;37m'; GR='\033[0;90m'; B='\033[1m'; N='\033[0m'
@@ -193,11 +200,11 @@ step_system() {
 }
 
 step_hwa() {
-    apt install -y "$MESA_ZINK_DEB" "$MESA_ZINK_DEV_DEB"
-    apt --fix-broken install -y
-    apt install -y $HWA_LIBS
-    apt install -y "$VULKAN_WRAPPER_DEB"
-    apt --fix-broken install -y
+    apt install -y $APT_OPTS "$MESA_ZINK_DEB" "$MESA_ZINK_DEV_DEB"
+    apt --fix-broken install -y $APT_OPTS
+    apt install -y $APT_OPTS $HWA_LIBS
+    apt install -y $APT_OPTS "$VULKAN_WRAPPER_DEB"
+    apt --fix-broken install -y $APT_OPTS
     pkg install -y glmark2 vkmark
 }
 
@@ -207,7 +214,7 @@ step_install_desktops() {
     for id in "${SEL_DE[@]}"; do
         for i in "${!DE_IDS[@]}"; do
             if [[ "${DE_IDS[$i]}" == "$id" ]]; then
-                pkg install -y ${DE_PKGS[$i]}
+                pkg install -y $APT_OPTS ${DE_PKGS[$i]}
                 echo "${DE_IDS[$i]}|${DE_NAMES[$i]}|${DE_LAUNCH[$i]}" >> "$DESKTOPS_CONF"
             fi
         done
@@ -218,7 +225,7 @@ step_install_apps() {
     local id i
     for id in "${SEL_APP[@]}"; do
         for i in "${!APP_IDS[@]}"; do
-            [[ "${APP_IDS[$i]}" == "$id" ]] && pkg install -y ${APP_PKGS[$i]}
+            [[ "${APP_IDS[$i]}" == "$id" ]] && pkg install -y $APT_OPTS ${APP_PKGS[$i]}
         done
     done
 }
