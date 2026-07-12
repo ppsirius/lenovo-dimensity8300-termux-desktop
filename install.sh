@@ -10,22 +10,54 @@
 #  ADD AN APP    : append one entry to each APP_* array.
 #  No other code needs to change.
 #
-#  Flags:  --selftest   validate registries & exit
+#  Flags:  --selftest   validate registries & vendored files, then exit
 #          --list       list available desktops & exit
+#          --sync       refresh ./vendor from upstream (uses tag vars) & exit
+#          -y, --yes    non-interactive (defaults: XFCE4, no apps/proot/mirror)
+#          --no-deps    skip the base packages/repos step
+#          --no-bin     skip the helper-scripts & launcher step
 #          --help       show usage
 # =============================================================================
+#
+#  Package source: by default uses files vendored in ./vendor (pinned, offline).
+#  Set USE_LATEST=1 (or edit the tag vars + run --sync) to pull newer versions
+#  from avelith07/Termux-Desktop at install time.
 
 # ============================ CONFIG ==========================================
-REPO="avelith07/Termux-Desktop"
-RAW="https://raw.githubusercontent.com/$REPO/refs/heads/main"
-REL="https://github.com/$REPO/releases/download"
+# Resolve the script's own directory (so vendored files are found wherever it runs)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-MESA_ZINK_DEB="$REL/v23.0.4-5/mesa-zink_23.0.4-5_aarch64.deb"
-MESA_ZINK_DEV_DEB="$REL/v23.0.4-5/mesa-zink-dev_23.0.4-5_all.deb"
-VULKAN_WRAPPER_DEB="$REL/v25.0.0-2/vulkan-wrapper-android_25.0.0-2_aarch64.deb"
+# ---------------------------------------------------------------------------
+# Package source & versions
+# ---------------------------------------------------------------------------
+# By default the installer uses the files vendored in ./vendor (pinned, offline,
+# reproducible). Set USE_LATEST=1 to refresh them from upstream at install time.
+USE_LATEST=0
+
+UPSTREAM="avelith07/Termux-Desktop"
+UPSTREAM_RAW="https://raw.githubusercontent.com/$UPSTREAM/refs/heads/main"
+UPSTREAM_REL="https://github.com/$UPSTREAM/releases/download"
+
+# Release tags. Bump these to pick up newer HWA builds, then set USE_LATEST=1
+# (or run: ./install.sh --sync). Asset URLs are derived from these tags.
+MESA_ZINK_TAG="v23.0.4-5"
+VULKAN_WRAPPER_TAG="v25.0.0-2"
+
+VENDOR_BIN="$SCRIPT_DIR/vendor/bin"
+VENDOR_DEBS="$SCRIPT_DIR/vendor/debs"
+
+# derive versioned file names from the tags (v23.0.4-5 -> 23.0.4-5)
+MESA_VER="${MESA_ZINK_TAG#v}"
+VULKAN_VER="${VULKAN_WRAPPER_TAG#v}"
+MESA_ZINK_DEB="$VENDOR_DEBS/mesa-zink_${MESA_VER}_aarch64.deb"
+MESA_ZINK_DEV_DEB="$VENDOR_DEBS/mesa-zink-dev_${MESA_VER}_all.deb"
+VULKAN_WRAPPER_DEB="$VENDOR_DEBS/vulkan-wrapper-android_${VULKAN_VER}_aarch64.deb"
+
+# helper scripts vendored from upstream bin/
+BIN_SCRIPTS=(apphwa native_cleaner proot_program termux-fastest-repo desktop-help termux-multi-instance extract)
 
 HWA_LIBS="virglrenderer-mesa-zink vulkan-loader-generic angle-android virglrenderer-android libandroid-shmem libc++ libdrm libx11 libxcb libxshmfence libwayland zlib zstd"
-BASE_PKGS="x11-repo termux-x11-nightly tur-repo termux-api pulseaudio proot-distro rsync wget"
+BASE_PKGS="x11-repo termux-x11-nightly tur-repo termux-api pulseaudio proot-distro curl"
 
 # --- DESKTOPS REGISTRY (extend here) -----------------------------------------
 DE_IDS=(    "xfce4"                              "i3"                              "openbox"                              "fluxbox"                             )
@@ -37,9 +69,6 @@ DE_LAUNCH=( "xfce4-session"                      "i3"                           
 APP_IDS=(   "firefox"   "chromium"  "vlc"   "mpv"   "code-oss"      "geany" )
 APP_NAMES=( "Firefox"   "Chromium"   "VLC"   "MPV"   "VS Code (code-oss)" "Geany" )
 APP_PKGS=(  "firefox"   "chromium"   "vlc-qt" "mpv"  "code-oss"      "geany" )
-
-# --- upstream helper scripts to drop in ~/bin --------------------------------
-BIN_SCRIPTS=(apphwa native_cleaner proot_program termux-fastest-repo desktop-help termux-multi-instance extract)
 
 CONF_DIR="$HOME/.config/termux-desktop"
 DESKTOPS_CONF="$CONF_DIR/desktops.conf"
@@ -123,21 +152,17 @@ step_system() {
     pkg install -y $BASE_PKGS
     termux-wake-lock
     [ "$DO_MIRROR" = 1 ] && {
-        wget -qO ~/termux-fastest-repo "$RAW/bin/termux-fastest-repo"
+        cp "$VENDOR_BIN/termux-fastest-repo" ~/termux-fastest-repo
         chmod +x ~/termux-fastest-repo; ~/termux-fastest-repo; rm -f ~/termux-fastest-repo
     }
 }
 
 step_hwa() {
-    local t; t="$(mktemp -d)"
-    cd "$t"
-    wget -qO mz.deb      "$MESA_ZINK_DEB"
-    wget -qO mz-dev.deb  "$MESA_ZINK_DEV_DEB"
-    apt install -y ./*.deb; apt --fix-broken install -y
+    apt install -y "$MESA_ZINK_DEB" "$MESA_ZINK_DEV_DEB"
+    apt --fix-broken install -y
     apt install -y $HWA_LIBS
-    wget -qO vulkan-icd.deb "$VULKAN_WRAPPER_DEB"
-    apt install -y ./vulkan-icd.deb; apt --fix-broken install -y
-    cd ~; rm -rf "$t"
+    apt install -y "$VULKAN_WRAPPER_DEB"
+    apt --fix-broken install -y
     pkg install -y glmark2 vkmark
 }
 
@@ -165,20 +190,12 @@ step_install_apps() {
 
 step_helpers() {
     mkdir -p ~/bin
-    local s
-    for s in "${BIN_SCRIPTS[@]}"; do
-        wget -qO ~/bin/"$s" "$RAW/bin/$s"
-    done
+    cp "$VENDOR_BIN"/* ~/bin/
     chmod +x ~/bin/*
 
-    # install the generic desktop launcher
-    local d="$HOME/bin/desktop"
-    if [ -f "$SCRIPT_DIR/desktop.sh" ]; then
-        cp "$SCRIPT_DIR/desktop.sh" "$d"
-    else
-        wget -qO "$d" "$RAW/desktop.sh" 2>/dev/null || true
-    fi
-    chmod +x "$d" 2>/dev/null
+    # the generic desktop launcher (lives next to install.sh)
+    cp "$SCRIPT_DIR/desktop.sh" ~/bin/desktop
+    chmod +x ~/bin/desktop
 
     # make sure ~/bin is on PATH
     grep -q 'export PATH="$HOME/bin:$PATH"' ~/.bashrc 2>/dev/null \
@@ -196,6 +213,24 @@ mkdir -p "$HOME/bin"
 EOF
 }
 
+# ============================ SYNC VENDOR =====================================
+# Refresh vendored files from upstream (used when USE_LATEST=1 or --sync).
+# Bin scripts come from the main branch (truly latest); debs come from the
+# release tags defined above (asset URLs are derived from the tags).
+sync_vendor() {
+    command -v curl >/dev/null 2>&1 || pkg install -y curl >/dev/null 2>&1
+    mkdir -p "$VENDOR_BIN" "$VENDOR_DEBS"
+    local s
+    for s in "${BIN_SCRIPTS[@]}"; do
+        curl -fsSL -o "$VENDOR_BIN/$s" "$UPSTREAM_RAW/bin/$s" \
+            || echo -e "${R}failed to fetch $s${N}"
+    done
+    chmod +x "$VENDOR_BIN"/* 2>/dev/null
+    curl -fsSL -o "$MESA_ZINK_DEB"      "$UPSTREAM_REL/$MESA_ZINK_TAG/mesa-zink_${MESA_VER}_aarch64.deb"      || echo -e "${R}failed to fetch mesa-zink deb${N}"
+    curl -fsSL -o "$MESA_ZINK_DEV_DEB"  "$UPSTREAM_REL/$MESA_ZINK_TAG/mesa-zink-dev_${MESA_VER}_all.deb"      || echo -e "${R}failed to fetch mesa-zink-dev deb${N}"
+    curl -fsSL -o "$VULKAN_WRAPPER_DEB" "$UPSTREAM_REL/$VULKAN_WRAPPER_TAG/vulkan-wrapper-android_${VULKAN_VER}_aarch64.deb" || echo -e "${R}failed to fetch vulkan-wrapper deb${N}"
+}
+
 # ============================ SELF-TEST ======================================
 selftest() {
     local err=0 n=${#DE_IDS[@]}
@@ -210,7 +245,16 @@ selftest() {
     local na=${#APP_IDS[@]}
     [ ${#APP_NAMES[@]} -eq $na ] || { echo "APP_NAMES length != APP_IDS"; err=1; }
     [ ${#APP_PKGS[@]}  -eq $na ] || { echo "APP_PKGS length != APP_IDS";  err=1; }
-    [ $err -eq 0 ] && echo -e "${G}selftest OK${N} - $n desktops, $na apps registered"
+    # vendored files must be present when not fetching latest
+    if [ "$USE_LATEST" = 0 ]; then
+        for f in "$MESA_ZINK_DEB" "$MESA_ZINK_DEV_DEB" "$VULKAN_WRAPPER_DEB"; do
+            [ -f "$f" ] || { echo "missing vendor deb: $f"; err=1; }
+        done
+        for s in "${BIN_SCRIPTS[@]}"; do
+            [ -f "$VENDOR_BIN/$s" ] || { echo "missing vendor script: $s"; err=1; }
+        done
+    fi
+    [ $err -eq 0 ] && echo -e "${G}selftest OK${N} - $n desktops, $na apps registered, vendor OK"
     return $err
 }
 
@@ -226,48 +270,66 @@ usage() {
 }
 
 # ============================ MAIN ===========================================
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ASSUME_YES=0; SKIP_DEPS=0; SKIP_BIN=0
 
-case "${1:-}" in
-    --selftest) selftest; exit $?;;
-    --list)     list_desktops; exit 0;;
-    --help|-h)  usage; exit 0;;
-esac
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --selftest) selftest; exit $?;;
+        --list)     list_desktops; exit 0;;
+        --sync)     echo -e "${Y}Refreshing vendored files from upstream...${N}"
+                    sync_vendor; echo -e "${G}Done.${N}"; exit 0;;
+        --help|-h)  usage; exit 0;;
+        -y|--yes)   ASSUME_YES=1; shift;;
+        --no-deps)  SKIP_DEPS=1; shift;;
+        --no-bin)   SKIP_BIN=1; shift;;
+        *) echo -e "${R}Unknown flag: $1${N}"; usage; exit 1;;
+    esac
+done
 
 banner
 
 echo -e "${W}This wizard installs a native Linux desktop in Termux with Mali HWA.${N}"
-echo -e "${GR}Source of the HWA stack: $REPO (MIT). Upstream is unmaintained but functional.${N}\n"
+echo -e "${GR}HWA stack: $UPSTREAM (MIT). Upstream is unmaintained but functional.${N}"
+[ "$USE_LATEST" = 1 ] && echo -e "${Y}USE_LATEST=1 -> refreshing vendored files from upstream.${N}\n" \
+                       || echo -e "${GR}Using pinned vendored files (USE_LATEST=0).${N}\n"
 
-DO_MIRROR=0; yesno "Optimize package mirrors first (needs a keypress)?" && DO_MIRROR=1
+# refresh vendored files now if requested
+[ "$USE_LATEST" = 1 ] && sync_vendor
 
-# --- desktop selection (mandatory) ---
-MENU_IDS=("${DE_IDS[@]}"); MENU_NAMES=("${DE_NAMES[@]}")
-while :; do
-    pick_multi "Select desktop(s) to install:"
-    [ ${#SELECTED[@]} -gt 0 ] && break
-    echo -e "${R}Pick at least one.${N}"
-done
-SEL_DE=("${SELECTED[@]}")
-echo -e "${G}Desktops:${N} ${SEL_DE[*]}\n"
+if [ "$ASSUME_YES" = 1 ]; then
+    echo -e "${Y}Non-interactive mode (-y): defaults = XFCE4, no apps, no PRoot, no mirror.${N}\n"
+    SEL_DE=("xfce4"); SEL_APP=(); DO_MIRROR=0; DO_PROOT=0
+else
+    DO_MIRROR=0; yesno "Optimize package mirrors first (needs a keypress)?" && DO_MIRROR=1
 
-# --- apps selection (optional) ---
-MENU_IDS=("${APP_IDS[@]}"); MENU_NAMES=("${APP_NAMES[@]}")
-pick_multi "Select apps to install (optional):"
-SEL_APP=("${SELECTED[@]}")
-[ ${#SEL_APP[@]} -gt 0 ] && echo -e "${G}Apps:${N} ${SEL_APP[*]}\n"
+    # --- desktop selection (mandatory) ---
+    MENU_IDS=("${DE_IDS[@]}"); MENU_NAMES=("${DE_NAMES[@]}")
+    while :; do
+        pick_multi "Select desktop(s) to install:"
+        [ ${#SELECTED[@]} -gt 0 ] && break
+        echo -e "${R}Pick at least one.${N}"
+    done
+    SEL_DE=("${SELECTED[@]}")
+    echo -e "${G}Desktops:${N} ${SEL_DE[*]}\n"
 
-# --- proot (optional) ---
-DO_PROOT=0; yesno "Install Debian PRoot container (for broader app compat)?" && DO_PROOT=1
+    # --- apps selection (optional) ---
+    MENU_IDS=("${APP_IDS[@]}"); MENU_NAMES=("${APP_NAMES[@]}")
+    pick_multi "Select apps to install (optional):"
+    SEL_APP=("${SELECTED[@]}")
+    [ ${#SEL_APP[@]} -gt 0 ] && echo -e "${G}Apps:${N} ${SEL_APP[*]}\n"
+
+    # --- proot (optional) ---
+    DO_PROOT=0; yesno "Install Debian PRoot container (for broader app compat)?" && DO_PROOT=1
+fi
 
 # --- build the step list (accurate progress) ---
 steps_label=(); steps_fn=()
-steps_label+=("System update, repos & base packages"); steps_fn+=(step_system)
+[ "$SKIP_DEPS" = 0 ] && { steps_label+=("System update, repos & base packages"); steps_fn+=(step_system); }
 steps_label+=("Hardware acceleration (Mali/Zink/Vulkan)"); steps_fn+=(step_hwa)
 steps_label+=("Desktop environment(s)");               steps_fn+=(step_install_desktops)
 [ ${#SEL_APP[@]} -gt 0 ] && { steps_label+=("Applications"); steps_fn+=(step_install_apps); }
-steps_label+=("Helper scripts & launcher");             steps_fn+=(step_helpers)
-[ "$DO_PROOT" = 1 ] && { steps_label+=("Debian PRoot container"); steps_fn+=(step_proot); }
+[ "$SKIP_BIN" = 0 ]  && { steps_label+=("Helper scripts & launcher"); steps_fn+=(step_helpers); }
+[ "$DO_PROOT" = 1 ]  && { steps_label+=("Debian PRoot container"); steps_fn+=(step_proot); }
 
 TOTAL=${#steps_fn[@]}
 echo -e "${C}Running ${TOTAL} phases. Sit back.${N}\n"

@@ -5,7 +5,7 @@
 </p>
 
 > Transparent product render (background removed). To swap it, replace
-> `assets/lenovo-pad-pro-12.7-keyboard.png`.
+> `assets/transparent-image.png`.
 
 A modular shell wizard that installs a **native** Linux desktop in Termux with
 **Mali hardware acceleration** (Zink → Vulkan), and a generic launcher that
@@ -75,20 +75,18 @@ Install **all three** APKs from GitHub (turn off Play Protect temporarily if ins
 
 ## 2. Get the scripts
 
-Open Termux and run:
+This repo is **self-contained** — the HWA `.deb` packages and helper scripts are
+vendored in `vendor/`, so the installer does **not** download anything from
+upstream at runtime. Clone the whole repo (or download a release ZIP):
 
 ```bash
 pkg update -y && pkg install -y git
-git clone https://github.com/<your-user>/termux-desktop-installer.git
-cd termux-desktop-installer
+git clone https://github.com/<your-user>/lenovo-dimensity8300-termux-desktop.git
+cd lenovo-dimensity8300-termux-desktop
 ```
 
-*(No git? Use wget for both files:)*
-```bash
-pkg install -y wget
-wget -O install.sh  <raw-url>/install.sh
-wget -O desktop.sh  <raw-url>/desktop.sh
-```
+> Clone or download the ZIP — don't grab individual files, or `vendor/` (the HWA
+> debs) will be missing and `./install.sh --selftest` will report them absent.
 
 ---
 
@@ -111,13 +109,49 @@ The wizard will:
 
 Each phase shows a spinner and a progress bar. Failures are reported but do not abort the whole run.
 
+### Non-interactive / automated install
+
+Skip all prompts and install with defaults (XFCE4, no apps, no PRoot):
+
+```bash
+./install.sh -y
+```
+
+Combine with step-skips to run only what you need (e.g. re-install just the desktop
+onto an already-set-up system):
+
+```bash
+./install.sh -y --no-deps --no-bin   # skip base packages & helper scripts, just HWA + desktop
+```
+
 ### Useful flags
 
 ```bash
-./install.sh --selftest   # validate the DE/app registries, then exit
+./install.sh --selftest   # validate registries AND that vendor/ files are present
 ./install.sh --list       # list available desktops
+./install.sh --sync       # refresh ./vendor from upstream (uses the tag vars), then exit
+./install.sh -y|--yes     # non-interactive (defaults: XFCE4, no apps/proot/mirror)
+./install.sh --no-deps    # skip the base packages/repos step
+./install.sh --no-bin     # skip the helper-scripts & launcher step
 ./install.sh --help       # usage
 ```
+
+### Using newer HWA packages
+
+By default the installer uses the **pinned, vendored** files in `vendor/` (offline,
+reproducible). To pull newer versions from upstream:
+
+1. Edit the tag variables at the top of `install.sh`:
+   ```bash
+   MESA_ZINK_TAG="v23.0.4-5"        # bump to a newer mesa-zink release tag
+   VULKAN_WRAPPER_TAG="v25.0.0-2"   # bump to a newer vulkan-wrapper release tag
+   ```
+2. Either set `USE_LATEST=1` (refreshes at install time) **or** run `./install.sh --sync`
+   once to update `vendor/`, then run `./install.sh` normally.
+
+Asset URLs are derived from the tags automatically (e.g. `v23.0.4-5` →
+`mesa-zink_23.0.4-5_aarch64.deb`), so bumping the tag is all you need. Check
+[upstream releases](https://github.com/avelith07/Termux-Desktop/releases) for new tags.
 
 ---
 
@@ -194,7 +228,7 @@ registry for every desktop you select.
 | Termux:X11 crashes / freezes / "signal" | See the Android tuning steps in §1; then force-stop **both** Termux and Termux:X11 and retry. |
 | Resolution too big/small | Press the Android **back** key, or leave & re-enter Termux:X11. For UI scale: open Termux:X11 *Preferences* (only when no session is running) → scaled mode. |
 | Cursor too fast/slow | Termux:X11 Preferences → enable *Capture external pointer devices* and adjust the speed factor. |
-| No audio | Re-run `desktop` (it restarts PulseAudio). Grant Termux:API the microphone permission (`termux-microphone-record -d 4` once). |
+| No audio / mic | See the **Audio / no sound** subsection below. |
 | `glmark2` is ~1 fps (no HWA) | Start the session with `desktop`, **not** the old `termux-xfce4`. Confirm `VK_ICD_FILENAMES` points to `wrapper_icd.aarch64.json`. |
 | `apt --fix-broken` loops | Run `pkg update && pkg upgrade -y`, then re-run `./install.sh`. |
 | A `pkg install <x>` fails | The package name may have changed; check `pkg search <x>`, fix the registry, re-run. |
@@ -210,15 +244,100 @@ registry for every desktop you select.
 
 **To start completely fresh**: Termux app info → *Clear data* → redo from §1.
 
+### Audio / no sound
+
+> **TL;DR** — Termux `pulseaudio` ships `module-sles-sink` (output, auto-loaded),
+> `module-sles-source` (mic) and `module-aaudio-sink` (AAudio output, off by
+> default). Your sink *does* load, so "no sound" is almost always a **muted sink
+> or zero volume**, or SLES not working on your device. The launcher already
+> ensures a sink exists and unmutes it at 100% on each launch.
+
+**Quickest fix** (run in Termux while the desktop is up):
+
+```bash
+pactl set-sink-mute   @DEFAULT_SINK@ false
+pactl set-sink-volume @DEFAULT_SINK@ 100%
+```
+
+…then turn up the **Android media volume**. If still silent, switch the output
+backend to AAudio:
+
+```bash
+AUDIO_BACKEND=aaudio desktop          # try AAudio instead of SLES
+export AUDIO_BACKEND=aaudio           # make it permanent in ~/.bashrc
+```
+
+If neither SLES nor AAudio works, fall back to **PipeWire** (step 4 below).
+Full diagnosis & alternatives:
+
+The launcher starts PulseAudio with an OpenSL ES output sink (`module-sles-sink`)
+and unmutes it at 100%. If you still hear nothing, work through these in order:
+
+**1. Diagnose** (run these in Termux while the desktop is running):
+
+```bash
+pulseaudio --check && echo "PA running" || echo "PA NOT running"
+pactl list short sinks            # need at least one sink listed
+pactl list short sink-inputs      # is an app actually playing?
+pactl get-sink-mute @DEFAULT_SINK@   # should print "no"
+```
+
+- No sink listed → the SLES sink failed to load (go to step 3).
+- `PA NOT running` → `pulseaudio --kill; pulseaudio --start`, then re-launch `desktop`.
+
+**2. Volume & permissions (the most common cause):**
+
+```bash
+pactl set-sink-mute   @DEFAULT_SINK@ false
+pactl set-sink-volume @DEFAULT_SINK@ 100%
+```
+
+Also turn up the **Android media volume** (volume keys while a video plays, or
+Settings → Sound → Media). Grant the mic permission once:
+`termux-microphone-record -d 4`.
+
+**3. Switch the output backend to AAudio** — SLES doesn't work on every device;
+AAudio (the modern Android audio API) often does. Re-launch with:
+
+```bash
+AUDIO_BACKEND=aaudio desktop
+```
+
+This unloads `module-sles-sink` and loads `module-aaudio-sink` instead. If AAudio
+works for you, you can make it permanent by adding `export AUDIO_BACKEND=aaudio`
+to `~/.bashrc`. (You can also try it manually: `pactl load-module module-aaudio-sink`.)
+
+**4. Use PipeWire instead of PulseAudio** (if neither SLES nor AAudio works):
+
+```bash
+pkg install pipewire pipewire-pulse pulseaudio-utils
+pulseaudio --kill
+pipewire        &
+pipewire-pulse  &
+pactl list short sinks        # check a sink appears
+```
+
+`pipewire-pulse` provides a PulseAudio-compatible socket, so desktop apps keep
+working with `PULSE_SERVER=127.0.0.1`. To make this the default, edit `desktop.sh`
+and replace the PulseAudio block with the two PipeWire daemons.
+
+**Quick test tone** (no app needed): `speaker-test -c2 -l1` or
+`paplay /system/media/audio/ui/camera_click.ogg`.
+
 ---
 
 ## 7. Files
 
-| File | Purpose |
+| Path | Purpose |
 |------|---------|
-| `install.sh` | The wizard. All config/registries live at its top. |
-| `desktop.sh` | Copied to `~/bin/desktop`. Generic Mali launcher. |
+| `install.sh` | The wizard. All config, registries and version tags live at its top. |
+| `desktop.sh` | Copied to `~/bin/desktop`. Generic Mali launcher (any installed DE). |
+| `vendor/bin/` | 7 helper scripts (`apphwa`, `desktop-help`, …) vendored from upstream. |
+| `vendor/debs/` | 3 HWA `.deb` packages (mesa-zink, vulkan-wrapper) — vendored, offline. |
+| `assets/` | The device photo used in this README. |
 | `README.md` | This file. |
+
+Nothing outside this repo is fetched at install time unless you enable `USE_LATEST`.
 
 ## 8. What was corrected vs. a common draft
 

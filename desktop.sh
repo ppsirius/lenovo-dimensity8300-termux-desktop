@@ -57,10 +57,30 @@ pkill -9 -f "pulseaudio"    2>/dev/null
 sleep 1
 
 # --- audio (network pulseaudio + mic via SLES) ------------------------------
+# AUDIO_BACKEND: "sles" (default) or "aaudio" — try aaudio if SLES gives no sound.
 pulseaudio --start \
     --load="module-native-protocol-tcp auth-ip-acl=127.0.0.1 auth-anonymous=1" \
     --exit-idle-time=-1
 pactl load-module module-sles-source 2>/dev/null
+
+# switch output backend if requested (AAudio often works where SLES doesn't)
+if [ "${AUDIO_BACKEND:-sles}" = "aaudio" ]; then
+    pactl list short modules 2>/dev/null | awk '/module-sles-sink/{print $1}' \
+        | while read -r mi; do pactl unload-module "$mi" 2>/dev/null; done
+    pactl load-module module-aaudio-sink 2>/dev/null
+fi
+
+# make sure an output sink exists, then unmute + set full volume
+if [ -z "$(pactl list short sinks 2>/dev/null)" ]; then
+    pactl load-module module-sles-sink 2>/dev/null \
+        || pactl load-module module-aaudio-sink 2>/dev/null
+fi
+SINK="$(pactl list short sinks 2>/dev/null | head -n1 | awk '{print $2}')"
+[ -n "$SINK" ] && {
+    pactl set-default-sink "$SINK" 2>/dev/null
+    pactl set-sink-mute   "$SINK" false 2>/dev/null
+    pactl set-sink-volume "$SINK" 100%  2>/dev/null
+}
 
 export DISPLAY=:0
 export PULSE_SERVER=127.0.0.1

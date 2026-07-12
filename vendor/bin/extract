@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+
+set -e
+
+usage() {
+    echo "Usage:"
+    echo "  extract -x <archive>"
+    echo "  extract -a <output_archive> <files_or_dirs...>"
+    exit 1
+}
+
+[ $# -lt 2 ] && usage
+
+MODE="$1"
+shift
+
+extract_archive() {
+    FILE="$1"
+    [ ! -f "$FILE" ] && { echo "File not found: $FILE"; exit 1; }
+
+    case "$FILE" in
+        *.tar)        tar -xf "$FILE" ;;
+        *.tar.gz|*.tgz)   tar -xzf "$FILE" ;;
+        *.tar.bz2|*.tbz2) tar -xjf "$FILE" ;;
+        *.tar.xz|*.txz)   tar -xJf "$FILE" ;;
+        *.zip)        unzip "$FILE" ;;
+        *.7z)         7z x "$FILE" ;;
+        *.rar)        unrar x "$FILE" ;;
+        *.gz)         gunzip "$FILE" ;;
+        *.bz2)        bunzip2 "$FILE" ;;
+        *.xz)         unxz "$FILE" ;;
+        *)
+            echo "Unsupported archive format"
+            exit 1
+            ;;
+    esac
+}
+
+archive_files() {
+    OUT="$1"
+    shift
+    [ $# -eq 0 ] && { echo "No input files"; exit 1; }
+
+    TMPDIR=$(mktemp -d)
+
+    for ITEM in "$@"; do
+        ITEM=$(realpath "$ITEM")
+        PARENT=$(dirname "$ITEM")
+        BASE=$(basename "$ITEM")
+
+        mkdir -p "$TMPDIR/$BASE"
+        if [ -d "$ITEM" ]; then
+            cp -a "$ITEM" "$TMPDIR/"
+        else
+            cp -a "$ITEM" "$TMPDIR/$BASE"
+            mv "$TMPDIR/$BASE/$BASE" "$TMPDIR/$BASE"
+            rmdir "$TMPDIR/$BASE"
+        fi
+    done
+
+    case "$OUT" in
+        *.tar)        tar -cf "$OUT" -C "$TMPDIR" . ;;
+        *.tar.gz|*.tgz)   tar -czf "$OUT" -C "$TMPDIR" . ;;
+        *.tar.bz2|*.tbz2) tar -cjf "$OUT" -C "$TMPDIR" . ;;
+        *.tar.xz|*.txz)   tar -cJf "$OUT" -C "$TMPDIR" . ;;
+        *.zip)        (cd "$TMPDIR" && zip -r "$OUT" .) ;;
+        *.7z)         (cd "$TMPDIR" && 7z a "$OUT" .) ;;
+        *)
+            rm -rf "$TMPDIR"
+            echo "Unsupported format"
+            exit 1
+            ;;
+    esac
+
+    rm -rf "$TMPDIR"
+}
+
+case "$MODE" in
+    -x) extract_archive "$1" ;;
+    -a) archive_files "$@" ;;
+    *) usage ;;
+esac
