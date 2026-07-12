@@ -63,7 +63,7 @@ HWA_LIBS="virglrenderer-mesa-zink vulkan-loader-generic angle-android virglrende
 # --- DESKTOPS REGISTRY (extend here) -----------------------------------------
 DE_IDS=(    "xfce4"                              "i3"                              "openbox"                              "fluxbox"                             )
 DE_NAMES=(  "XFCE4 - full desktop (recommended)" "i3 - tiling window manager"      "Openbox - lightweight floating WM"    "Fluxbox - lightweight stacking WM"   )
-DE_PKGS=(   "xfce4 xfce4-goodies xfce4-whiskermenu-plugin xfce4-battery-plugin xfce4-cpugraph-plugin xfce4-docklike-plugin xfce4-pulseaudio-plugin xfce4-screenshooter xfce4-taskmanager mousepad pavucontrol" "i3 i3status dmenu xfce4-terminal" "openbox tint2 obconf xfce4-terminal" "fluxbox xfce4-terminal" )
+DE_PKGS=(   "xfce4 xfce4-goodies xfce4-whiskermenu-plugin xfce4-battery-plugin xfce4-cpugraph-plugin xfce4-netload-plugin xfce4-docklike-plugin xfce4-pulseaudio-plugin xfce4-screenshooter xfce4-taskmanager mousepad pavucontrol" "i3 i3status dmenu xfce4-terminal" "openbox tint2 obconf xfce4-terminal" "fluxbox xfce4-terminal" )
 DE_LAUNCH=( "xfce4-session"                      "i3"                              "openbox-session"                      "fluxbox"                             )
 
 # --- APPS REGISTRY (extend here) ---------------------------------------------
@@ -196,7 +196,7 @@ yesno() {
 step_system() {
     apt-get update -y
     apt-get upgrade -y $APT_OPTS
-    # naprawia przejściowe braki bibliotek po upgrade (libpcre2.so, etc.)
+    # repair transient missing libs after upgrade (libpcre2.so, etc.)
     apt-get --fix-broken install -y $APT_OPTS
     apt-get install -y $APT_OPTS x11-repo tur-repo
     apt-get update -y
@@ -242,6 +242,18 @@ step_install_desktops() {
             fi
         done
     done
+
+    # XFCE4: pre-configure panel with monitoring + wallpaper
+    if [[ " ${SEL_DE[*]} " == *" xfce4 "* ]]; then
+        local xfconf="$HOME/.config/xfce4/xfconf/xfce-perchannel-xml"
+        mkdir -p "$xfconf"
+        cp "$SCRIPT_DIR/configs/xfce4/xfce4-panel.xml" "$xfconf/xfce4-panel.xml"
+        local wal="" bg_dir="$PREFIX/share/backgrounds/xfce"
+        [ -d "$bg_dir" ] && wal=$(find "$bg_dir" -maxdepth 1 \( -name '*.jpg' -o -name '*.png' -o -name '*.svg' \) 2>/dev/null | head -1)
+        if [ -n "$wal" ]; then
+            sed "s|WALLPAPER_PATH|$wal|g" "$SCRIPT_DIR/configs/xfce4/xfce4-desktop.xml" > "$xfconf/xfce4-desktop.xml"
+        fi
+    fi
 }
 
 step_install_apps() {
