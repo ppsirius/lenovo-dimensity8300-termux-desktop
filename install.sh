@@ -536,9 +536,8 @@ else
     SEL_APP=("${SELECTED[@]}")
     [ ${#SEL_APP[@]} -gt 0 ] && echo -e "${G}Apps:${N} ${SEL_APP[*]}\n"
 
-    # --- proot distro selection (optional) ---
-    if [ -z "$SEL_PROOT" ]; then
-        echo -e "${C}Install a PRoot container? (for broader app compat, LLM dev tools, etc.)${N}"
+    # --- proot distro selection (optional, default skip for faster iteration) ---
+    if [ -z "$SEL_PROOT" ] && yesno "Install a PRoot container? (broader app compat, LLM dev tools)"; then
         echo -e "${GR}Available distros:${N}"
         for i in "${!PROOT_IDS[@]}"; do
             printf "  ${C}%d${N}) ${G}%-10s${N} %s" "$((i+1))" "${PROOT_IDS[$i]}" "${PROOT_NAMES[$i]}"
@@ -562,7 +561,7 @@ else
                 ;;
         esac
     else
-        echo -e "${G}PRoot distro (from CLI):${N} ${SEL_PROOT}\n"
+        [ -n "$SEL_PROOT" ] && echo -e "${G}PRoot distro (from CLI):${N} ${SEL_PROOT}\n"
     fi
 fi
 
