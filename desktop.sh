@@ -49,12 +49,20 @@ cmd=""
 for i in "${!IDS[@]}"; do [ "${IDS[$i]}" = "$target" ] && cmd="${LAUNCH[$i]}"; done
 [ -z "$cmd" ] && { echo -e "${R}Unknown desktop: $target${N}"; echo -e "${GR}Installed: ${IDS[*]}${N}"; exit 1; }
 
-echo -e "${Y}Starting ${W}$target${Y} with Mali HWA (Zink + Vulkan)...${N}"
+echo -e "${Y}Starting ${W}$target${Y} with Mali HWA...${N}"
 
 # --- stop any previous session ----------------------------------------------
+am force-stop com.termux.x11 2>/dev/null
 pkill -9 -f "termux.x11"    2>/dev/null
+pkill -9 -f "Xwayland"      2>/dev/null
 pkill -9 -f "pulseaudio"    2>/dev/null
 sleep 1
+
+# --- clean stale X sockets / locks / virgl socket ---------------------------
+rm -f  "${TMPDIR}"/.X*-lock     2>/dev/null
+rm -rf "${TMPDIR}"/.X11-unix    2>/dev/null
+mkdir -p "${TMPDIR}"/.X11-unix
+chmod 1777 "${TMPDIR}"/.X11-unix
 
 # --- audio (network pulseaudio) ---------------------------------------------
 # --disallow-exit --disable-shm: nie szukamy ALSA/OSS na Androidzie
@@ -94,16 +102,39 @@ export MESA_NO_ERROR=1
 export MESA_SHADER_CACHE_DISABLE=false
 export MESA_NO_WAIT_FOR_VBLANK=1
 export vblank_mode=0
-export MESA_LOADER_DRIVER_OVERRIDE=zink
-export GALLIUM_DRIVER=zink
-export ZINK_DESCRIPTORS=lazy
 export LIBGL_DRI3_ENABLE=1
-# Only pin the wrapper ICD when it exists (vendored vulkan-wrapper-android);
-# otherwise let the repo Vulkan loader auto-discover its ICD.
-export VK_ICD_FILENAMES=/data/data/com.termux/files/usr/share/vulkan/icd.d/wrapper_icd.aarch64.json
-[ -f "$VK_ICD_FILENAMES" ] || unset VK_ICD_FILENAMES
 export WRAPPER_LOG_LEVEL=none
 export WRAPPER_CMD_LOG_LEVEL=none
+
+GPU_MODE=""
+[ -f "$HOME/.config/termux-desktop/gpu.conf" ] && GPU_MODE=$(cat "$HOME/.config/termux-desktop/gpu.conf")
+
+if [ "$GPU_MODE" = "virgl" ]; then
+    # virgl path: desktop shell stays software (llvmpipe); GPU is per-app via
+    # `gpu` alias inside proot. The virgl server must be running for `gpu` apps.
+    export LIBGL_ALWAYS_SOFTWARE=1
+    export GALLIUM_DRIVER=llvmpipe
+    # Start the virgl server (ANGLE -> Vulkan mode) if not already running.
+    if ! pgrep -f 'virgl_test' >/dev/null 2>&1; then
+        if [ -x "$HOME/vgl" ]; then
+            rm -f "${TMPDIR}"/.virgl_test 2>/dev/null
+            "$HOME/vgl" angle=vulkan
+            sleep 2
+        else
+            echo -e "${Y}  WARN: ~/vgl not found — virgl server not started.${N}"
+            echo -e "${Y}        Per-app GPU (`gpu`) will not work without it.${N}"
+        fi
+    fi
+else
+    # Zink path (vendored / mesa26 / repo): OpenGL -> Vulkan -> Mali
+    export MESA_LOADER_DRIVER_OVERRIDE=zink
+    export GALLIUM_DRIVER=zink
+    export ZINK_DESCRIPTORS=lazy
+    # Only pin the wrapper ICD when it exists (vendored vulkan-wrapper-android);
+    # otherwise let the repo Vulkan loader auto-discover its ICD.
+    export VK_ICD_FILENAMES=/data/data/com.termux/files/usr/share/vulkan/icd.d/wrapper_icd.aarch64.json
+    [ -f "$VK_ICD_FILENAMES" ] || unset VK_ICD_FILENAMES
+fi
 
 # --- start the X server ------------------------------------------------------
 termux-x11 :0 >/dev/null 2>&1 &

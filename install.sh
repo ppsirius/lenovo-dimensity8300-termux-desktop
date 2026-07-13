@@ -431,6 +431,7 @@ step_hwa_virgl() {
 step_install_desktops() {
     local id i
     mkdir -p "$CONF_DIR"; : > "$DESKTOPS_CONF"
+    echo "$GPU_SOURCE" > "$CONF_DIR/gpu.conf"
     for id in "${SEL_DE[@]}"; do
         for i in "${!DE_IDS[@]}"; do
             if [[ "${DE_IDS[$i]}" == "$id" ]]; then
@@ -539,6 +540,15 @@ step_proot() {
                 mkdir -p /root/bin
             " ;;
     esac
+
+    # virgl: set up the `gpu` alias inside the proot container so apps can use
+    # the GPU (virpipe -> virgl_test_server -> ANGLE -> Vulkan -> Mali).
+    if [ "$GPU_SOURCE" = "virgl" ]; then
+        local _gpu_alias='alias gpu='\''env -u LIBGL_ALWAYS_SOFTWARE GALLIUM_DRIVER=virpipe MESA_GL_VERSION_OVERRIDE=4.1COMPAT MESA_GLSL_VERSION_OVERRIDE=410'\'''
+        proot-distro login "$alias" --shared-tmp -- /bin/bash -c "
+            grep -q 'alias gpu=' ~/.bashrc 2>/dev/null || echo '$_gpu_alias' >> ~/.bashrc
+        " 2>/dev/null || true
+    fi
 }
 
 # ============================ SYNC VENDOR =====================================
