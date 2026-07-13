@@ -18,17 +18,20 @@
 #          --vendored       use pinned ./vendor HWA debs (DEFAULT; only verified-accelerating path)
 #          --repo           install mesa-zink from Termux/tur repos (stale 22.0.5; experimental)
 #          --mesa26         install Mesa 26.x from the main repo (newest; experimental) + vendored Mali shim
+#          --virgl          install virgl + ANGLE -> Vulkan stack (ar37-rs; for proot containers)
 #          --no-deps        skip the base packages/repos step
 #          --no-bin         skip the helper-scripts & launcher step
 #          --verbose        show live output during install (default: show on failure only)
 #          --help           show usage
 # =============================================================================
 #
-#  GPU/HWA source: three paths. DEFAULT is --vendored (pinned ./vendor debs,
+#  GPU/HWA source: four paths. DEFAULT is --vendored (pinned ./vendor debs,
 #  the only path verified to accelerate on Mali-G615). --repo installs the
 #  stale mesa-zink (tur, 22.0.5) — experimental. --mesa26 installs Mesa 26.x
 #  from the main repo (newest, includes Zink) + the vendored Mali shim — also
-#  experimental. USE_LATEST=1 and --sync refresh the vendored debs from
+#  experimental. --virgl installs the virgl -> ANGLE -> Vulkan stack from
+#  ar37-rs/virgl-angle (designed for proot containers; per-app GPU via `gpu`).
+#  USE_LATEST=1 and --sync refresh the vendored debs from
 #  avelith07/Termux-Desktop (only relevant with --vendored).
 
 # ============================ CONFIG ==========================================
@@ -83,6 +86,13 @@ HWA_LIBS="virglrenderer-mesa-zink vulkan-loader-generic angle-android virglrende
 # (virglrenderer-mesa-zink depends on mesa-zink, which mesa26 replaces with the
 # main `mesa` package; virgl is the GL-over-virtio path, unused by Zink anyway).
 HWA_LIBS_MESA26="vulkan-loader-generic angle-android libandroid-shmem libc++ libdrm libx11 libxcb libxshmfence libwayland zlib zstd"
+
+# virgl path: virglrenderer + ANGLE -> Vulkan (ar37-rs/virgl-angle approach).
+# Render chain: app -> virpipe -> virgl_test_server -> ANGLE -> Vulkan -> Mali.
+# Designed for proot containers; desktop stays software, GPU is per-app (`gpu`).
+VGL_URL="https://github.com/ar37-rs/virgl-angle/raw/refs/heads/main/vgl"
+VIRGL_ICD_URL="https://github.com/ar37-rs/virgl-angle/releases/download/latest/mesa-vulkan-icd-wrapper_25.0.0-1_aarch64.deb"
+HWA_LIBS_VIRGL="virglrenderer virglrenderer-android angle-android vulkan-loader-generic libandroid-shmem libc++ libdrm libx11 libxcb libxshmfence libwayland zlib zstd"
 
 # --- DESKTOPS REGISTRY (extend here) -----------------------------------------
 DE_IDS=(    "xfce4"                              "i3"                              "openbox"                              "fluxbox"                             )
@@ -374,6 +384,50 @@ step_hwa_mesa26() {
     fi
 }
 
+# virgl -> ANGLE -> Vulkan path (ar37-rs/virgl-angle approach, Theguilherm3 repo).
+# Render chain: app -> virpipe -> virgl_test_server -> ANGLE -> Vulkan -> Mali.
+# Desktop shell stays software (llvmpipe); GPU is applied per-app via `gpu` alias.
+# The Mali Vulkan ICD wrapper from ar37-rs is required — without it ANGLE falls
+# back to Mali's broken OpenGL path (texImage2D 0x0502 / EGL_BAD_ACCESS).
+# This path does NOT touch step_hwa_vendor — the verified fallback stays intact.
+step_hwa_virgl() {
+    # virgl + ANGLE + Vulkan loader from Termux repos
+    apt install -y $APT_OPTS $HWA_LIBS_VIRGL
+    # Remove swrast ICD — it shadows the Mali Vulkan ICD wrapper.
+    apt remove -y '*icd-swrast' 2>/dev/null || true
+    # Mali Vulkan ICD wrapper (ar37-rs) — redirects ANGLE to Mali's Vulkan driver.
+    local _icd_deb="/tmp/mesa-vulkan-icd-wrapper_25.0.0-1_aarch64.deb"
+    command -v wget >/dev/null 2>&1 || pkg install -y wget >/dev/null 2>&1
+    wget -q -O "$_icd_deb" "$VIRGL_ICD_URL"
+    dpkg -i "$_icd_deb"
+    rm -f "$_icd_deb"
+    apt-get --fix-broken install -y $APT_OPTS
+    # vgl launcher script (virgl server manager: start/stop/target_app)
+    local _vgl="$HOME/vgl"
+    curl -fsSL -o "$_vgl" "$VGL_URL" \
+        || wget -q -O "$_vgl" "$VGL_URL"
+    chmod +x "$_vgl"
+    apt install -y $APT_OPTS mesa-demos glmark2 vkmark
+    # --- Diagnostics ---
+    local _diag="/tmp/termux-install-virgl-diag.log"
+    : > "$_diag"
+    {
+        echo "=== virgl diagnostics ==="
+        echo "vgl script: $([ -x "$_vgl" ] && echo present || echo MISSING)"
+        echo "--- virgl packages ---"
+        dpkg -l virglrenderer virglrenderer-android angle-android vulkan-loader-generic 2>/dev/null | grep ^ii || true
+        echo "--- Mali ICD ---"
+        local _icd="$PREFIX/share/vulkan/icd.d/mesa-vulkan-icd-wrapper.json"
+        [ -f "$_icd" ] && cat "$_icd" || echo "ICD MISSING at $_icd"
+        echo "--- ANGLE libs ---"
+        ls "$PREFIX/opt/angle-android/"*/libEGL*.so 2>/dev/null || echo "ANGLE libs not found"
+        echo "=== end diagnostics ==="
+    } >> "$_diag" 2>&1
+    echo -e "${C}  Diagnostics: $_diag${N}"
+    echo -e "${Y}  NOTE: before starting the desktop, run: ~/vgl angle=vulkan${N}"
+    echo -e "${Y}  Per-app GPU: prefix apps with 'gpu' inside proot (see README).${N}"
+}
+
 step_install_desktops() {
     local id i
     mkdir -p "$CONF_DIR"; : > "$DESKTOPS_CONF"
@@ -526,7 +580,7 @@ selftest() {
     [ ${#PROOT_PM[@]} -eq $np ]     || { echo "PROOT_PM length != PROOT_IDS"; err=1; }
     [ ${#PROOT_WARN[@]} -eq $np ]   || { echo "PROOT_WARN length != PROOT_IDS"; err=1; }
     # vendored HWA debs: vendor path needs all three; mesa26 needs the Mali
-    # shim (wrapper) only; repo needs none.
+    # shim (wrapper) only; repo and virgl need none (virgl downloads at runtime).
     if [ "$GPU_SOURCE" = vendor ] || [ "$GPU_SOURCE" = mesa26 ]; then
         [ -f "$VULKAN_WRAPPER_DEB" ] || { echo "missing vendor deb: $VULKAN_WRAPPER_DEB"; err=1; }
     fi
@@ -581,6 +635,7 @@ while [ $# -gt 0 ]; do
         --vendored) GPU_SOURCE=vendor; shift;;
         --repo)     GPU_SOURCE=repo; shift;;
         --mesa26)   GPU_SOURCE=mesa26; shift;;
+        --virgl)    GPU_SOURCE=virgl; shift;;
         --verbose)  VERBOSE=1; shift;;
         *) echo -e "${R}Unknown flag: $1${N}"; usage; exit 1;;
     esac
@@ -601,6 +656,7 @@ echo -e "${W}This wizard installs a native Linux desktop in Termux with Mali HWA
 case "$GPU_SOURCE" in
     repo)   echo -e "${GR}HWA: mesa-zink from Termux/tur repos (stale 22.0.5, experimental).${N}\n" ;;
     mesa26) echo -e "${GR}HWA: Mesa 26.x from main repo + vendored Mali shim (experimental).${N}\n" ;;
+    virgl)  echo -e "${GR}HWA: virgl -> ANGLE -> Vulkan (ar37-rs; per-app GPU for proot).${N}\n" ;;
     *)
         echo -e "${GR}HWA stack: $UPSTREAM (MIT). Upstream is unmaintained but functional.${N}"
         if [ "$USE_LATEST" = 1 ]; then
@@ -676,6 +732,7 @@ steps_label=(); steps_fn=()
 case "$GPU_SOURCE" in
     repo)   steps_label+=("Hardware acceleration (mesa-zink from repos — stale 22.0.5)"); steps_fn+=(step_hwa_repo) ;;
     mesa26) steps_label+=("Hardware acceleration (Mesa 26.x from main repo + Mali shim)"); steps_fn+=(step_hwa_mesa26) ;;
+    virgl)  steps_label+=("Hardware acceleration (virgl -> ANGLE -> Vulkan)");              steps_fn+=(step_hwa_virgl) ;;
     *)      steps_label+=("Hardware acceleration (pinned vendored Mesa/Zink/Vulkan)");     steps_fn+=(step_hwa_vendor) ;;
 esac
 steps_label+=("Desktop environment(s)");               steps_fn+=(step_install_desktops)

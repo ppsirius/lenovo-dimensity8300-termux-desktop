@@ -5,8 +5,8 @@
 </p>
 
 A modular shell wizard that installs a **native** Linux desktop in Termux with
-**Mali hardware acceleration** (Zink → Vulkan), and a generic launcher that
-starts any installed desktop (XFCE4, i3, Openbox, Fluxbox).
+**Mali hardware acceleration** (Zink → Vulkan, or virgl → ANGLE → Vulkan), and a
+generic launcher that starts any installed desktop (XFCE4, i3, Openbox, Fluxbox).
 
 Based on [`avelith07/Termux-Desktop`](https://github.com/avelith07/Termux-Desktop) (MIT) — unmaintained upstream whose HWA build artifacts work for Mali+Vulkan and are vendored in `vendor/`.
 
@@ -61,8 +61,9 @@ Install **all three** APKs from GitHub (turn off Play Protect temporarily if ins
 This repo is **self-contained** — the helper scripts and a known-working HWA
 `.deb` set are vendored in `vendor/`. By default the installer uses the
 **vendored** HWA debs (the only path verified to accelerate on Mali-G615); pass
-`--mesa26` to try the newest Mesa 26.x from the main repo, or `--repo` for the
-stale tur mesa-zink. Clone the whole repo (or download a release ZIP):
+`--mesa26` to try the newest Mesa 26.x from the main repo, `--repo` for the
+stale tur mesa-zink, or `--virgl` for the virgl → ANGLE → Vulkan stack
+(designed for proot containers). Clone the whole repo (or download a release ZIP):
 
 ```bash
 pkg update -y && pkg install -y git
@@ -126,6 +127,7 @@ onto an already-set-up system):
 ./install.sh --vendored           # use pinned ./vendor HWA debs (DEFAULT; only verified-accelerating path)
 ./install.sh --repo               # install mesa-zink from Termux/tur repos (stale 22.0.5; experimental)
 ./install.sh --mesa26             # Mesa 26.x from the main repo (newest) + vendored Mali shim (experimental)
+./install.sh --virgl             # virgl -> ANGLE -> Vulkan stack (ar37-rs; for proot containers)
 ./install.sh --no-deps            # skip the base packages/repos step
 ./install.sh --no-bin             # skip the helper-scripts & launcher step
 ./install.sh --verbose            # show live output (default: full log shown on failure)
@@ -136,15 +138,16 @@ If a phase fails, the installer dumps the **full log** (e.g.
 `/tmp/termux-install-XXXXXX.log`). Re-run with `--verbose` to see
 live output as it happens.
 
-### HWA packages: three GPU paths
+### HWA packages: four GPU paths
 
-The installer has three GPU paths, selectable by flag:
+The installer has four GPU paths, selectable by flag:
 
 | Flag | mesa source | Mali shim | Status |
 |------|-------------|-----------|--------|
 | *(default)* | vendored `mesa-zink` **23.0.4-5** (`vendor/debs/`) | vendored `vulkan-wrapper-android` 25.0.0-2 | ✅ **only path verified to accelerate** |
 | `--mesa26` | `mesa` **26.0.6** (termux-main, newest; includes Zink) | vendored shim | ⚠ experimental — Mesa 26 Zink needs `VK_KHR_maintenance5` (present on Mali-G615) |
 | `--repo` | `mesa-zink` **22.0.5** (tur-repo, stale) | vendored shim | ⚠ experimental — older than the vendored fallback |
+| `--virgl` | `virglrenderer` + `angle-android` (ar37-rs/virgl-angle) | `mesa-vulkan-icd-wrapper` 25.0.0-1 (ar37-rs) | ⚠ experimental — per-app GPU for proot containers |
 
 > **Why two mesa packages?** `mesa-zink` (tur) and `mesa` (termux-main) are
 > separate packages. `mesa` 26.x includes the Zink driver
@@ -152,13 +155,54 @@ The installer has three GPU paths, selectable by flag:
 > So `mesa` (26.0.6) is the real "newest", and the vendored 23.0.4-5 is newer
 > than tur's 22.0.5.
 
-All three paths install the **vendored `vulkan-wrapper-android` ICD shim** — the
-manifest that redirects the loader to the proprietary Mali driver. Without it you
-get "failed to load driver: zink" → llvmpipe. The shim is decoupled from Mesa's
-version (pure ICD manifest), so it pairs safely with any mesa.
+All Zink paths (--vendored, --mesa26, --repo) install the **vendored
+`vulkan-wrapper-android` ICD shim** — the manifest that redirects the loader to
+the proprietary Mali driver. Without it you get "failed to load driver: zink"
+→ llvmpipe. The shim is decoupled from Mesa's version (pure ICD manifest), so
+it pairs safely with any mesa.
 
-**Recovery:** if `--mesa26` or `--repo` regresses (Zink won't load → llvmpipe),
-fall back to the verified path:
+#### The `--virgl` path (virgl → ANGLE → Vulkan)
+
+Based on [`Theguilherm3/termux-mali-gpu-acceleration`](https://github.com/Theguilherm3/termux-mali-gpu-acceleration)
+and [`ar37-rs/virgl-angle`](https://github.com/ar37-rs/virgl-angle). This is a
+fundamentally different approach from Zink:
+
+```
+app (proot) → Mesa virpipe → socket → virgl_test_server → ANGLE → Vulkan → Mali
+```
+
+- **Desktop shell** stays software-rendered (llvmpipe) for stability.
+- **GPU is per-app** — prefix GL/WebGL apps with `gpu` inside the proot container.
+- The `vgl` launcher script is installed to `~/vgl`.
+- The Mali Vulkan ICD wrapper (`mesa-vulkan-icd-wrapper_25.0.0-1`) is downloaded
+  from ar37-rs at install time — without it, ANGLE falls back to Mali's broken
+  OpenGL path (`texImage2D 0x0502` / `EGL_BAD_ACCESS`).
+
+**Before starting the desktop**, start the virgl server:
+
+```bash
+~/vgl angle=vulkan
+```
+
+**Per-app GPU inside proot** — add this alias to `~/.bashrc` inside the container:
+
+```bash
+alias gpu='env -u LIBGL_ALWAYS_SOFTWARE GALLIUM_DRIVER=virpipe MESA_GL_VERSION_OVERRIDE=4.1COMPAT MESA_GLSL_VERSION_OVERRIDE=410'
+```
+
+Then:
+
+```bash
+gpu glxgears -info     # GL_RENDERER should say: virgl (ANGLE (ARM, Vulkan ... (Mali-...)))
+gpu firefox            # hardware-accelerated WebGL
+```
+
+> **Limitations:** virgl's bridge overhead caps throughput at ~10% of native.
+> No video decode acceleration (VA-API through virgl). `virgl_fence_set_fd:
+> failed err=-9` in logs is a known limitation (noise, not fatal).
+
+**Recovery:** if `--mesa26`, `--repo`, or `--virgl` regresses (Zink won't load
+→ llvmpipe, or virgl server won't start), fall back to the verified path:
 ```bash
 ./install.sh                # defaults to --vendored
 ```
@@ -228,6 +272,25 @@ Then recover to the verified-accelerated fallback:
 
 ```bash
 ./install.sh --vendored                 # pinned known-good mesa-zink + Mali shim
+```
+
+### Verify hardware acceleration (--virgl path)
+
+For the virgl path, start the server first (`~/vgl angle=vulkan`), then
+**inside the proot container**:
+
+```bash
+gpu glxgears -info     # GL_RENDERER should say: virgl (ANGLE (ARM, Vulkan ... (Mali-...)))
+gpu glmark2            # GL benchmark via virgl -> ANGLE -> Vulkan
+```
+
+If `GL_RENDERER` shows `llvmpipe` instead of `virgl`, the virgl server isn't
+running or the ICD wrapper is missing. Check:
+
+```bash
+~/vgl q                # stop any stale server
+~/vgl angle=vulkan     # restart
+cat /tmp/termux-install-virgl-diag.log   # install-time diagnostics
 ```
 
 The most common cause of a dead session is starting it with the old
@@ -452,6 +515,8 @@ Android Settings → Apps → Termux → Permissions → **Microphone**. Without
 | `README.md` | This file. |
 
 By default the HWA stack comes from the Termux repos; the vendored set is the
-offline fallback (`--vendored`).
+offline fallback (`--vendored`). The `--virgl` path downloads the `vgl` script
+and Mali ICD wrapper from ar37-rs/virgl-angle at install time (no vendored files
+needed).
 
 
