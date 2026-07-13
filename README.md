@@ -342,6 +342,51 @@ and replace the PulseAudio block with the two PipeWire daemons.
 
 ---
 
+## 7b. General Termux Performance Tips
+
+These are commonly recommended practices from the Termux community.
+
+### Use F-Droid Termux, not Play Store
+The Play Store build is deprecated and breaks on current Android versions.
+Always install from [F-Droid](https://f-droid.org/en/packages/com.termux/) or
+[GitHub releases](https://github.com/termux/termux-app/releases).
+
+### Phantom Process Killer (signal 9)
+If Termux dies with `[Process completed (signal 9) - press Enter]` mid-session,
+Android's phantom process killer is the cause, not a Termux bug. Fix per version:
+
+| Android | Fix |
+|---------|-----|
+| **14+** | Developer Options → **Disable child process restrictions** → reboot |
+| **12L / 13** | `adb shell "settings put global settings_enable_monitor_phantom_procs false"` → reboot |
+| **12** | `adb shell "/system/bin/device_config put activity_manager max_phantom_processes 2147483647"` → reboot |
+| **Rooted** (any) | `su -c "settings put global settings_enable_monitor_phantom_procs false"` → reboot |
+
+> ⚠️ A system update may reset these — reapply if signal 9 returns. Long-running
+> AI agent sessions are the workload most likely to trigger it even after the fix.
+
+### Battery Optimization
+- Android Settings → Apps → Termux → Battery → **Unrestricted**
+- Disable any power-saving mode while running the desktop.
+
+### WakeLock
+Pull down notifications → tap Termux entry → **Acquire WakeLock**. Or run:
+`termux-wake-lock`. This prevents the CPU from freezing when the screen is off.
+
+### Termux:X11 Settings
+- **Display scale**: 170–200% for a phone-sized screen (Settings → Display → Scale).
+- **Scancode mode**: enable "Prefer scancodes when possible" if WASD keys
+  don't register in games.
+
+### Storage Access
+Run `termux-setup-storage` once to mount `/sdcard` under `~/storage`.
+
+### Audio Microphone
+Android Settings → Apps → Termux → Permissions → **Microphone**. Without this,
+`pactl load-module module-sles-source` in `desktop.sh` will fail.
+
+---
+
 ## 8. Files
 
 | Path | Purpose |
