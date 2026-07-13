@@ -15,18 +15,21 @@
 #          --sync           refresh ./vendor from upstream (uses tag vars) & exit
 #          -y, --yes        non-interactive (defaults: XFCE4, no apps/proot/mirror)
 #          --proot-distro D also install a proot container (D = debian|arch|manjaro|fedora|alpine)
-#          --vendored       use pinned ./vendor HWA debs (fallback) instead of latest from repos
+#          --vendored       use pinned ./vendor HWA debs (DEFAULT; only verified-accelerating path)
+#          --repo           install mesa-zink from Termux/tur repos (stale 22.0.5; experimental)
+#          --mesa26         install Mesa 26.x from the main repo (newest; experimental) + vendored Mali shim
 #          --no-deps        skip the base packages/repos step
 #          --no-bin         skip the helper-scripts & launcher step
 #          --verbose        show live output during install (default: show on failure only)
 #          --help           show usage
 # =============================================================================
 #
-#  GPU/HWA source: by default installs the latest coherent Mesa/Zink/Vulkan
-#  stack from the Termux repos (pkg, one transaction). Pass --vendored to fall
-#  back to the pinned ./vendor debs (known-working, offline). USE_LATEST=1 and
-#  --sync refresh those vendored debs from avelith07/Termux-Desktop; only
-#  relevant together with --vendored.
+#  GPU/HWA source: three paths. DEFAULT is --vendored (pinned ./vendor debs,
+#  the only path verified to accelerate on Mali-G615). --repo installs the
+#  stale mesa-zink (tur, 22.0.5) — experimental. --mesa26 installs Mesa 26.x
+#  from the main repo (newest, includes Zink) + the vendored Mali shim — also
+#  experimental. USE_LATEST=1 and --sync refresh the vendored debs from
+#  avelith07/Termux-Desktop (only relevant with --vendored).
 
 # ============================ CONFIG ==========================================
 # Resolve the script's own directory (so vendored files are found wherever it runs)
@@ -35,10 +38,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ---------------------------------------------------------------------------
 # Package source & versions
 # ---------------------------------------------------------------------------
-# GPU/HWA source: "repo" (default) pulls the latest coherent Mesa/Zink/Vulkan
-# stack from the Termux repos. "vendor" uses the pinned ./vendor debs as a
-# known-working fallback (--vendored).
-GPU_SOURCE="repo"
+# GPU/HWA source: "vendor" (default) uses the pinned ./vendor debs — the only
+# path verified to accelerate on Mali-G615. "repo" installs from the Termux
+# repos; note tur-repo's mesa-zink is stale (22.0.5, OLDER than vendored
+# 23.0.4-5), so "repo" is experimental and currently a downgrade. The newer
+# Mesa 26.x lives in the main-repo `mesa` package (not `mesa-zink`) — that's a
+# separate, untested path. See AGENTS.md.
+GPU_SOURCE="vendor"
 
 # Refresh the vendored fallback debs from upstream before using them
 # (only relevant with --vendored). --sync does the same thing standalone.
@@ -293,6 +299,30 @@ step_hwa_vendor() {
     apt-get install -y $APT_OPTS mesa-demos glmark2 vkmark
 }
 
+# Experimental: newest Mesa (26.x) from the main repo, which includes the Zink
+# driver (-Dgallium-drivers=…,zink), paired with the vendored Mali ICD shim.
+# mesa-zink is now obsolete (main mesa ships zink_dri.so), so it's removed first
+# to avoid a file-ownership conflict on that path. mesa 26.x Zink needs
+# VK_KHR_maintenance5 (a Vulkan 1.4 extension) — present on the Mali-G615
+# driver; if Zink still won't load, --vendored recovers. This path does NOT
+# touch step_hwa_vendor — the verified fallback stays intact.
+step_hwa_mesa26() {
+    apt-mark unhold mesa-zink mesa-zink-dev vulkan-wrapper-android 2>/dev/null || true
+    # main mesa and mesa-zink both ship zink_dri.so — drop mesa-zink first.
+    apt-get remove -y mesa-zink mesa-zink-dev 2>/dev/null || true
+    apt install -y $APT_OPTS mesa
+    # vendored Mali ICD shim (decoupled from Mesa version — pure manifest).
+    if [ -f "$VULKAN_WRAPPER_DEB" ]; then
+        dpkg -i "$VULKAN_WRAPPER_DEB"
+        apt-mark hold vulkan-wrapper-android 2>/dev/null || true
+    else
+        echo -e "${Y}WARN: $VULKAN_WRAPPER_DEB missing — Mali ICD shim not installed," >&2
+        echo -e "       acceleration will likely fail. Run: ./install.sh --sync${N}" >&2
+    fi
+    apt-get --fix-broken install -y $APT_OPTS
+    apt install -y $APT_OPTS mesa-demos $HWA_LIBS glmark2 vkmark
+}
+
 step_install_desktops() {
     local id i
     mkdir -p "$CONF_DIR"; : > "$DESKTOPS_CONF"
@@ -444,9 +474,13 @@ selftest() {
     [ ${#PROOT_PKGS[@]} -eq $np ]   || { echo "PROOT_PKGS length != PROOT_IDS"; err=1; }
     [ ${#PROOT_PM[@]} -eq $np ]     || { echo "PROOT_PM length != PROOT_IDS"; err=1; }
     [ ${#PROOT_WARN[@]} -eq $np ]   || { echo "PROOT_WARN length != PROOT_IDS"; err=1; }
-    # vendored HWA debs only required when using the --vendored fallback
+    # vendored HWA debs: vendor path needs all three; mesa26 needs the Mali
+    # shim (wrapper) only; repo needs none.
+    if [ "$GPU_SOURCE" = vendor ] || [ "$GPU_SOURCE" = mesa26 ]; then
+        [ -f "$VULKAN_WRAPPER_DEB" ] || { echo "missing vendor deb: $VULKAN_WRAPPER_DEB"; err=1; }
+    fi
     if [ "$GPU_SOURCE" = vendor ]; then
-        for f in "$MESA_ZINK_DEB" "$MESA_ZINK_DEV_DEB" "$VULKAN_WRAPPER_DEB"; do
+        for f in "$MESA_ZINK_DEB" "$MESA_ZINK_DEV_DEB"; do
             [ -f "$f" ] || { echo "missing vendor deb: $f"; err=1; }
         done
     fi
@@ -494,6 +528,8 @@ while [ $# -gt 0 ]; do
         --no-deps)  SKIP_DEPS=1; shift;;
         --no-bin)   SKIP_BIN=1; shift;;
         --vendored) GPU_SOURCE=vendor; shift;;
+        --repo)     GPU_SOURCE=repo; shift;;
+        --mesa26)   GPU_SOURCE=mesa26; shift;;
         --verbose)  VERBOSE=1; shift;;
         *) echo -e "${R}Unknown flag: $1${N}"; usage; exit 1;;
     esac
@@ -511,16 +547,18 @@ fi
 banner
 
 echo -e "${W}This wizard installs a native Linux desktop in Termux with Mali HWA.${N}"
-if [ "$GPU_SOURCE" = repo ]; then
-    echo -e "${GR}HWA: installing latest Mesa/Zink/Vulkan from Termux repos.${N}\n"
-else
-    echo -e "${GR}HWA stack: $UPSTREAM (MIT). Upstream is unmaintained but functional.${N}"
-    if [ "$USE_LATEST" = 1 ]; then
-        echo -e "${Y}USE_LATEST=1 -> refreshing vendored files from upstream.${N}"
-        sync_vendor
-    fi
-    echo
-fi
+case "$GPU_SOURCE" in
+    repo)   echo -e "${GR}HWA: mesa-zink from Termux/tur repos (stale 22.0.5, experimental).${N}\n" ;;
+    mesa26) echo -e "${GR}HWA: Mesa 26.x from main repo + vendored Mali shim (experimental).${N}\n" ;;
+    *)
+        echo -e "${GR}HWA stack: $UPSTREAM (MIT). Upstream is unmaintained but functional.${N}"
+        if [ "$USE_LATEST" = 1 ]; then
+            echo -e "${Y}USE_LATEST=1 -> refreshing vendored files from upstream.${N}"
+            sync_vendor
+        fi
+        echo
+        ;;
+esac
 
 if [ "$ASSUME_YES" = 1 ]; then
     if [ -n "$SEL_PROOT" ]; then
@@ -584,11 +622,11 @@ setup_mirrors
 STEP_FAILED=0
 steps_label=(); steps_fn=()
 [ "$SKIP_DEPS" = 0 ] && { steps_label+=("System update, repos & base packages"); steps_fn+=(step_system); }
-if [ "$GPU_SOURCE" = repo ]; then
-    steps_label+=("Hardware acceleration (latest Mesa/Zink/Vulkan from repos)"); steps_fn+=(step_hwa_repo)
-else
-    steps_label+=("Hardware acceleration (pinned vendored Mesa/Zink/Vulkan)");  steps_fn+=(step_hwa_vendor)
-fi
+case "$GPU_SOURCE" in
+    repo)   steps_label+=("Hardware acceleration (mesa-zink from repos — stale 22.0.5)"); steps_fn+=(step_hwa_repo) ;;
+    mesa26) steps_label+=("Hardware acceleration (Mesa 26.x from main repo + Mali shim)"); steps_fn+=(step_hwa_mesa26) ;;
+    *)      steps_label+=("Hardware acceleration (pinned vendored Mesa/Zink/Vulkan)");     steps_fn+=(step_hwa_vendor) ;;
+esac
 steps_label+=("Desktop environment(s)");               steps_fn+=(step_install_desktops)
 [ ${#SEL_APP[@]} -gt 0 ] && { steps_label+=("Applications"); steps_fn+=(step_install_apps); }
 [ "$SKIP_BIN" = 0 ]  && { steps_label+=("Helper scripts & launcher"); steps_fn+=(step_helpers); }

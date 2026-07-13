@@ -59,9 +59,10 @@ Install **all three** APKs from GitHub (turn off Play Protect temporarily if ins
 ## 2. Get the scripts
 
 This repo is **self-contained** — the helper scripts and a known-working HWA
-`.deb` set are vendored in `vendor/`. By default the installer pulls the latest
-Mesa/Zink/Vulkan stack from the Termux repos (`pkg`); pass `--vendored` to use
-the offline vendored set instead. Clone the whole repo (or download a release ZIP):
+`.deb` set are vendored in `vendor/`. By default the installer uses the
+**vendored** HWA debs (the only path verified to accelerate on Mali-G615); pass
+`--mesa26` to try the newest Mesa 26.x from the main repo, or `--repo` for the
+stale tur mesa-zink. Clone the whole repo (or download a release ZIP):
 
 ```bash
 pkg update -y && pkg install -y git
@@ -122,7 +123,9 @@ onto an already-set-up system):
 ./install.sh --sync               # refresh ./vendor from upstream (uses the tag vars), then exit
 ./install.sh -y|--yes             # non-interactive (defaults: XFCE4, no apps/proot/mirror)
 ./install.sh --proot-distro D     # install a proot container (D = debian|arch|manjaro|fedora|alpine)
-./install.sh --vendored           # use pinned ./vendor HWA debs (fallback) instead of latest from repos
+./install.sh --vendored           # use pinned ./vendor HWA debs (DEFAULT; only verified-accelerating path)
+./install.sh --repo               # install mesa-zink from Termux/tur repos (stale 22.0.5; experimental)
+./install.sh --mesa26             # Mesa 26.x from the main repo (newest) + vendored Mali shim (experimental)
 ./install.sh --no-deps            # skip the base packages/repos step
 ./install.sh --no-bin             # skip the helper-scripts & launcher step
 ./install.sh --verbose            # show live output (default: full log shown on failure)
@@ -133,21 +136,34 @@ If a phase fails, the installer dumps the **full log** (e.g.
 `/tmp/termux-install-XXXXXX.log`). Re-run with `--verbose` to see
 live output as it happens.
 
-### HWA packages: latest from repos vs. pinned vendored
+### HWA packages: three GPU paths
 
-By default the installer takes **mesa-zink + mesa-zink-dev from the Termux
-repos** (latest, with upstream fixes) and **pairs them with the vendored
-`vulkan-wrapper-android` ICD shim** — the manifest that redirects the loader to
-the proprietary Mali driver. The repo's generic Vulkan loaders cannot see Mali,
-so without the shim you get "failed to load driver: zink" → llvmpipe. The shim
-is decoupled from Mesa's version (pure ICD manifest), so a newer repo mesa-zink
-+ the vendored shim is a valid, accelerating pairing. `mesa-demos` is included
-for `glxinfo` / `glxgears`.
+The installer has three GPU paths, selectable by flag:
 
-If a repo mesa-zink ever regresses (e.g. demands a Vulkan extension your Mali
-driver doesn't expose), pass **`--vendored`** to fall back to the **fully
-pinned, known-working** `.deb` set shipped in `vendor/debs/` (offline,
-reproducible): both mesa-zink **and** the shim at their verified versions.
+| Flag | mesa source | Mali shim | Status |
+|------|-------------|-----------|--------|
+| *(default)* | vendored `mesa-zink` **23.0.4-5** (`vendor/debs/`) | vendored `vulkan-wrapper-android` 25.0.0-2 | ✅ **only path verified to accelerate** |
+| `--mesa26` | `mesa` **26.0.6** (termux-main, newest; includes Zink) | vendored shim | ⚠ experimental — Mesa 26 Zink needs `VK_KHR_maintenance5` (present on Mali-G615) |
+| `--repo` | `mesa-zink` **22.0.5** (tur-repo, stale) | vendored shim | ⚠ experimental — older than the vendored fallback |
+
+> **Why two mesa packages?** `mesa-zink` (tur) and `mesa` (termux-main) are
+> separate packages. `mesa` 26.x includes the Zink driver
+> (`-Dgallium-drivers=…,zink`); `mesa-zink` is an abandoned leftover at 22.0.5.
+> So `mesa` (26.0.6) is the real "newest", and the vendored 23.0.4-5 is newer
+> than tur's 22.0.5.
+
+All three paths install the **vendored `vulkan-wrapper-android` ICD shim** — the
+manifest that redirects the loader to the proprietary Mali driver. Without it you
+get "failed to load driver: zink" → llvmpipe. The shim is decoupled from Mesa's
+version (pure ICD manifest), so it pairs safely with any mesa.
+
+**Recovery:** if `--mesa26` or `--repo` regresses (Zink won't load → llvmpipe),
+fall back to the verified path:
+```bash
+./install.sh                # defaults to --vendored
+```
+If `dpkg` complains about `zink_dri.so` ownership after switching paths,
+`pkg remove mesa` (or `mesa-zink`) first, then re-run.
 
 To refresh those vendored debs from upstream (only relevant with `--vendored`):
 
