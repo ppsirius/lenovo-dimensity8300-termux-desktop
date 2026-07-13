@@ -44,6 +44,11 @@ GPU_SOURCE="repo"
 # (only relevant with --vendored). --sync does the same thing standalone.
 USE_LATEST=0
 
+# Default Termux mirror group, pre-selected before the first `apt-get update`
+# so Termux doesn't scan every mirror worldwide ("no mirror group selected").
+# Target user is in Europe; override e.g. MIRROR_GROUP="asia" elsewhere.
+MIRROR_GROUP="europe"
+
 UPSTREAM="avelith07/Termux-Desktop"
 UPSTREAM_RAW="https://raw.githubusercontent.com/$UPSTREAM/refs/heads/main"
 UPSTREAM_REL="https://github.com/$UPSTREAM/releases/download"
@@ -202,6 +207,12 @@ yesno() {
 
 # ============================ STEP FUNCTIONS =================================
 step_system() {
+    # Pre-select a mirror group before the first update — otherwise Termux
+    # prints "no mirror group selected" and speed-tests every mirror worldwide.
+    local mdir="$PREFIX/etc/termux/mirrors" chosen="$PREFIX/etc/termux/chosen_mirrors"
+    if [ -d "$mdir/$MIRROR_GROUP" ] && [ ! -e "$chosen" ]; then
+        ln -s "$mdir/$MIRROR_GROUP" "$chosen"
+    fi
     apt-get update -y
     apt-get upgrade -y $APT_OPTS
     # repair transient missing libs after upgrade (libpcre2.so, etc.)
@@ -230,20 +241,34 @@ EOF
     }
 }
 
-# Latest coherent Mesa/Zink/Vulkan stack straight from the Termux repos — one
-# apt transaction lets the resolver pick mutually-compatible versions.
+# Latest coherent Mesa/Zink/Vulkan stack straight from the Termux repos.
+# NOTE: vulkan-wrapper-android is the upstream custom name and is NOT in the
+# repos — detect the standard Termux Vulkan loader instead.
 step_hwa_repo() {
-    apt install -y $APT_OPTS mesa-zink mesa-zink-dev vulkan-wrapper-android \
+    local vkpkg=""
+    for vkpkg in vulkan-loader-android vulkan-loader-generic vulkan-wrapper-android; do
+        apt-cache show "$vkpkg" >/dev/null 2>&1 && break
+    done
+    if [ -z "$vkpkg" ] || ! apt-cache show "$vkpkg" >/dev/null 2>&1; then
+        echo "ERROR: no Vulkan loader package found in enabled repos." >&2
+        echo "       Hint: pass --vendored to use the pinned offline stack." >&2
+        return 1
+    fi
+    echo "Using Vulkan loader package: $vkpkg"
+    apt install -y $APT_OPTS mesa-zink mesa-zink-dev "$vkpkg" \
         mesa-demos $HWA_LIBS glmark2 vkmark
 }
 
 # Known-working fallback: pinned vendored debs (offline, reproducible).
+# dpkg -i (not apt install) so the pinned versions win even if step_system's
+# upgrade pulled a newer repo mesa-zink — dpkg allows version replacement
+# where apt would refuse a downgrade.
 step_hwa_vendor() {
-    apt install -y $APT_OPTS "$MESA_ZINK_DEB" "$MESA_ZINK_DEV_DEB"
-    apt --fix-broken install -y $APT_OPTS
+    dpkg -i "$MESA_ZINK_DEB" "$MESA_ZINK_DEV_DEB"
+    apt-get --fix-broken install -y $APT_OPTS
     apt install -y $APT_OPTS $HWA_LIBS
-    apt install -y $APT_OPTS "$VULKAN_WRAPPER_DEB"
-    apt --fix-broken install -y $APT_OPTS
+    dpkg -i "$VULKAN_WRAPPER_DEB"
+    apt-get --fix-broken install -y $APT_OPTS
     apt-get install -y $APT_OPTS mesa-demos glmark2 vkmark
 }
 

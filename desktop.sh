@@ -98,7 +98,10 @@ export MESA_LOADER_DRIVER_OVERRIDE=zink
 export GALLIUM_DRIVER=zink
 export ZINK_DESCRIPTORS=lazy
 export LIBGL_DRI3_ENABLE=1
+# Only pin the wrapper ICD when it exists (vendored vulkan-wrapper-android);
+# otherwise let the repo Vulkan loader auto-discover its ICD.
 export VK_ICD_FILENAMES=/data/data/com.termux/files/usr/share/vulkan/icd.d/wrapper_icd.aarch64.json
+[ -f "$VK_ICD_FILENAMES" ] || unset VK_ICD_FILENAMES
 export WRAPPER_LOG_LEVEL=none
 export WRAPPER_CMD_LOG_LEVEL=none
 
