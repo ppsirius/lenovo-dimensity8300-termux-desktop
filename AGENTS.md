@@ -13,6 +13,11 @@ proot containers, and vendored HWA debs — no runtime dependency on upstream.
   installer.
 - Keep the shell script POSIX-friendly; avoid bashisms where `dash` would break.
 - One function = one step; phases are listed in `steps_label`/`steps_fn` arrays.
+- **`--vendored` is the only GPU path verified to accelerate on Mali-G615.**
+  Do NOT break it: leave `step_hwa_vendor`, the vendored debs in `vendor/debs/`,
+  `desktop.sh`'s HWA env vars, and the `wrapper_icd.aarch64.json` ICD path alone.
+  The repo path (`step_hwa_repo`) is experimental — when in doubt, favour the
+  vendored fallback. Any change that risks the vendored path is not allowed.
 
 # Validation (run after EVERY shell edit)
 
