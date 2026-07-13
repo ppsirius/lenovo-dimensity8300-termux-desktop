@@ -79,6 +79,11 @@ BIN_SCRIPTS=(apphwa native_cleaner proot_program termux-fastest-repo desktop-hel
 
 HWA_LIBS="virglrenderer-mesa-zink vulkan-loader-generic angle-android virglrenderer-android libandroid-shmem libc++ libdrm libx11 libxcb libxshmfence libwayland zlib zstd"
 
+# mesa26 path: same as HWA_LIBS but WITHOUT the virgl renderers
+# (virglrenderer-mesa-zink depends on mesa-zink, which mesa26 replaces with the
+# main `mesa` package; virgl is the GL-over-virtio path, unused by Zink anyway).
+HWA_LIBS_MESA26="vulkan-loader-generic angle-android libandroid-shmem libc++ libdrm libx11 libxcb libxshmfence libwayland zlib zstd"
+
 # --- DESKTOPS REGISTRY (extend here) -----------------------------------------
 DE_IDS=(    "xfce4"                              "i3"                              "openbox"                              "fluxbox"                             )
 DE_NAMES=(  "XFCE4 - full desktop (recommended)" "i3 - tiling window manager"      "Openbox - lightweight floating WM"    "Fluxbox - lightweight stacking WM"   )
@@ -307,11 +312,10 @@ step_hwa_vendor() {
 # driver; if Zink still won't load, --vendored recovers. This path does NOT
 # touch step_hwa_vendor — the verified fallback stays intact.
 step_hwa_mesa26() {
-    apt-mark unhold mesa-zink mesa-zink-dev vulkan-wrapper-android 2>/dev/null || true
-    # main mesa and mesa-zink both ship zink_dri.so — drop mesa-zink first.
-    apt-get remove -y mesa-zink mesa-zink-dev 2>/dev/null || true
+    # Fresh install: no mesa-zink to purge. Mesa 26.x from main repo provides
+    # libGL/libEGL + zink_dri.so. Paired with vendored Mali ICD shim.
     apt install -y $APT_OPTS mesa
-    # vendored Mali ICD shim (decoupled from Mesa version — pure manifest).
+    # Vendored Mali ICD shim (decoupled from Mesa version — pure manifest).
     if [ -f "$VULKAN_WRAPPER_DEB" ]; then
         dpkg -i "$VULKAN_WRAPPER_DEB"
         apt-mark hold vulkan-wrapper-android 2>/dev/null || true
@@ -320,7 +324,7 @@ step_hwa_mesa26() {
         echo -e "       acceleration will likely fail. Run: ./install.sh --sync${N}" >&2
     fi
     apt-get --fix-broken install -y $APT_OPTS
-    apt install -y $APT_OPTS mesa-demos $HWA_LIBS glmark2 vkmark
+    apt install -y $APT_OPTS mesa-demos $HWA_LIBS_MESA26 glmark2 vkmark
 }
 
 step_install_desktops() {
