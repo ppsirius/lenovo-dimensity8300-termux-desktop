@@ -57,9 +57,10 @@ Install **all three** APKs from GitHub (turn off Play Protect temporarily if ins
 
 ## 2. Get the scripts
 
-This repo is **self-contained** — the HWA `.deb` packages and helper scripts are
-vendored in `vendor/`, so the installer does **not** download anything from
-upstream at runtime. Clone the whole repo (or download a release ZIP):
+This repo is **self-contained** — the helper scripts and a known-working HWA
+`.deb` set are vendored in `vendor/`. By default the installer pulls the latest
+Mesa/Zink/Vulkan stack from the Termux repos (`pkg`); pass `--vendored` to use
+the offline vendored set instead. Clone the whole repo (or download a release ZIP):
 
 ```bash
 pkg update -y && pkg install -y git
@@ -120,6 +121,7 @@ onto an already-set-up system):
 ./install.sh --sync               # refresh ./vendor from upstream (uses the tag vars), then exit
 ./install.sh -y|--yes             # non-interactive (defaults: XFCE4, no apps/proot/mirror)
 ./install.sh --proot-distro D     # install a proot container (D = debian|arch|manjaro|fedora|alpine)
+./install.sh --vendored           # use pinned ./vendor HWA debs (fallback) instead of latest from repos
 ./install.sh --no-deps            # skip the base packages/repos step
 ./install.sh --no-bin             # skip the helper-scripts & launcher step
 ./install.sh --verbose            # show live output (default: full log shown on failure)
@@ -130,10 +132,19 @@ If a phase fails, the installer dumps the **full log** (e.g.
 `/tmp/termux-install-XXXXXX.log`). Re-run with `--verbose` to see
 live output as it happens.
 
-### Using newer HWA packages
+### HWA packages: latest from repos vs. pinned vendored
 
-By default the installer uses the **pinned, vendored** files in `vendor/` (offline,
-reproducible). To pull newer versions from upstream:
+By default the installer pulls the **latest coherent Mesa/Zink/Vulkan stack
+from the Termux repos** (`pkg`) in one transaction — the resolver picks
+mutually-compatible versions, so you get newer Zink/Mesa without manually
+matching version numbers across libraries. `mesa-demos` is included for
+`glxinfo` / `glxgears`.
+
+If a repo update ever regresses, pass **`--vendored`** to fall back to the
+**pinned, known-working** `.deb` set shipped in `vendor/debs/` (offline,
+reproducible).
+
+To refresh those vendored debs from upstream (only relevant with `--vendored`):
 
 1. Edit the tag variables at the top of `install.sh`:
    ```bash
@@ -141,7 +152,7 @@ reproducible). To pull newer versions from upstream:
    VULKAN_WRAPPER_TAG="v25.0.0-2"   # bump to a newer vulkan-wrapper release tag
    ```
 2. Either set `USE_LATEST=1` (refreshes at install time) **or** run `./install.sh --sync`
-   once to update `vendor/`, then run `./install.sh` normally.
+   once to update `vendor/`, then run `./install.sh --vendored` normally.
 
 Asset URLs are derived from the tags automatically (e.g. `v23.0.4-5` →
 `mesa-zink_23.0.4-5_aarch64.deb`), so bumping the tag is all you need. Check
@@ -394,10 +405,11 @@ Android Settings → Apps → Termux → Permissions → **Microphone**. Without
 | `install.sh` | The wizard. All config, registries and version tags live at its top. |
 | `desktop.sh` | Copied to `~/bin/desktop`. Generic Mali launcher (any installed DE). |
 | `vendor/bin/` | 7 helper scripts (`apphwa`, `desktop-help`, …) vendored from upstream. |
-| `vendor/debs/` | 3 HWA `.deb` packages (mesa-zink, vulkan-wrapper) — vendored, offline. |
+| `vendor/debs/` | 3 HWA `.deb` packages (mesa-zink, vulkan-wrapper) — pinned fallback used by `--vendored`. |
 | `assets/` | The device photo used in this README. |
 | `README.md` | This file. |
 
-Nothing outside this repo is fetched at install time unless you enable `USE_LATEST`.
+By default the HWA stack comes from the Termux repos; the vendored set is the
+offline fallback (`--vendored`).
 
 

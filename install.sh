@@ -15,15 +15,18 @@
 #          --sync           refresh ./vendor from upstream (uses tag vars) & exit
 #          -y, --yes        non-interactive (defaults: XFCE4, no apps/proot/mirror)
 #          --proot-distro D also install a proot container (D = debian|arch|manjaro|fedora|alpine)
+#          --vendored       use pinned ./vendor HWA debs (fallback) instead of latest from repos
 #          --no-deps        skip the base packages/repos step
 #          --no-bin         skip the helper-scripts & launcher step
 #          --verbose        show live output during install (default: show on failure only)
 #          --help           show usage
 # =============================================================================
 #
-#  Package source: by default uses files vendored in ./vendor (pinned, offline).
-#  Set USE_LATEST=1 (or edit the tag vars + run --sync) to pull newer versions
-#  from avelith07/Termux-Desktop at install time.
+#  GPU/HWA source: by default installs the latest coherent Mesa/Zink/Vulkan
+#  stack from the Termux repos (pkg, one transaction). Pass --vendored to fall
+#  back to the pinned ./vendor debs (known-working, offline). USE_LATEST=1 and
+#  --sync refresh those vendored debs from avelith07/Termux-Desktop; only
+#  relevant together with --vendored.
 
 # ============================ CONFIG ==========================================
 # Resolve the script's own directory (so vendored files are found wherever it runs)
@@ -32,8 +35,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ---------------------------------------------------------------------------
 # Package source & versions
 # ---------------------------------------------------------------------------
-# By default the installer uses the files vendored in ./vendor (pinned, offline,
-# reproducible). Set USE_LATEST=1 to refresh them from upstream at install time.
+# GPU/HWA source: "repo" (default) pulls the latest coherent Mesa/Zink/Vulkan
+# stack from the Termux repos. "vendor" uses the pinned ./vendor debs as a
+# known-working fallback (--vendored).
+GPU_SOURCE="repo"
+
+# Refresh the vendored fallback debs from upstream before using them
+# (only relevant with --vendored). --sync does the same thing standalone.
 USE_LATEST=0
 
 UPSTREAM="avelith07/Termux-Desktop"
@@ -222,13 +230,21 @@ EOF
     }
 }
 
-step_hwa() {
+# Latest coherent Mesa/Zink/Vulkan stack straight from the Termux repos — one
+# apt transaction lets the resolver pick mutually-compatible versions.
+step_hwa_repo() {
+    apt install -y $APT_OPTS mesa-zink mesa-zink-dev vulkan-wrapper-android \
+        mesa-demos $HWA_LIBS glmark2 vkmark
+}
+
+# Known-working fallback: pinned vendored debs (offline, reproducible).
+step_hwa_vendor() {
     apt install -y $APT_OPTS "$MESA_ZINK_DEB" "$MESA_ZINK_DEV_DEB"
     apt --fix-broken install -y $APT_OPTS
     apt install -y $APT_OPTS $HWA_LIBS
     apt install -y $APT_OPTS "$VULKAN_WRAPPER_DEB"
     apt --fix-broken install -y $APT_OPTS
-    apt-get install -y $APT_OPTS glmark2 vkmark
+    apt-get install -y $APT_OPTS mesa-demos glmark2 vkmark
 }
 
 step_install_desktops() {
@@ -382,15 +398,16 @@ selftest() {
     [ ${#PROOT_PKGS[@]} -eq $np ]   || { echo "PROOT_PKGS length != PROOT_IDS"; err=1; }
     [ ${#PROOT_PM[@]} -eq $np ]     || { echo "PROOT_PM length != PROOT_IDS"; err=1; }
     [ ${#PROOT_WARN[@]} -eq $np ]   || { echo "PROOT_WARN length != PROOT_IDS"; err=1; }
-    # vendored files must be present when not fetching latest
-    if [ "$USE_LATEST" = 0 ]; then
+    # vendored HWA debs only required when using the --vendored fallback
+    if [ "$GPU_SOURCE" = vendor ]; then
         for f in "$MESA_ZINK_DEB" "$MESA_ZINK_DEV_DEB" "$VULKAN_WRAPPER_DEB"; do
             [ -f "$f" ] || { echo "missing vendor deb: $f"; err=1; }
         done
-        for s in "${BIN_SCRIPTS[@]}"; do
-            [ -f "$VENDOR_BIN/$s" ] || { echo "missing vendor script: $s"; err=1; }
-        done
     fi
+    # bin scripts are always needed by step_helpers
+    for s in "${BIN_SCRIPTS[@]}"; do
+        [ -f "$VENDOR_BIN/$s" ] || { echo "missing vendor script: $s"; err=1; }
+    done
     [ $err -eq 0 ] && echo -e "${G}selftest OK${N} - $n desktops, $na apps, $np proot distros, vendor OK"
     return $err
 }
@@ -430,6 +447,7 @@ while [ $# -gt 0 ]; do
         --proot-distro) CLI_PROOT_DISTRO="$2"; shift 2;;
         --no-deps)  SKIP_DEPS=1; shift;;
         --no-bin)   SKIP_BIN=1; shift;;
+        --vendored) GPU_SOURCE=vendor; shift;;
         --verbose)  VERBOSE=1; shift;;
         *) echo -e "${R}Unknown flag: $1${N}"; usage; exit 1;;
     esac
@@ -447,12 +465,16 @@ fi
 banner
 
 echo -e "${W}This wizard installs a native Linux desktop in Termux with Mali HWA.${N}"
-echo -e "${GR}HWA stack: $UPSTREAM (MIT). Upstream is unmaintained but functional.${N}"
-[ "$USE_LATEST" = 1 ] && echo -e "${Y}USE_LATEST=1 -> refreshing vendored files from upstream.${N}\n" \
-                       || echo -e "${GR}Using pinned vendored files (USE_LATEST=0).${N}\n"
-
-# refresh vendored files now if requested
-[ "$USE_LATEST" = 1 ] && sync_vendor
+if [ "$GPU_SOURCE" = repo ]; then
+    echo -e "${GR}HWA: installing latest Mesa/Zink/Vulkan from Termux repos.${N}\n"
+else
+    echo -e "${GR}HWA stack: $UPSTREAM (MIT). Upstream is unmaintained but functional.${N}"
+    if [ "$USE_LATEST" = 1 ]; then
+        echo -e "${Y}USE_LATEST=1 -> refreshing vendored files from upstream.${N}"
+        sync_vendor
+    fi
+    echo
+fi
 
 if [ "$ASSUME_YES" = 1 ]; then
     if [ -n "$SEL_PROOT" ]; then
@@ -514,7 +536,11 @@ fi
 STEP_FAILED=0
 steps_label=(); steps_fn=()
 [ "$SKIP_DEPS" = 0 ] && { steps_label+=("System update, repos & base packages"); steps_fn+=(step_system); }
-steps_label+=("Hardware acceleration (Mali/Zink/Vulkan)"); steps_fn+=(step_hwa)
+if [ "$GPU_SOURCE" = repo ]; then
+    steps_label+=("Hardware acceleration (latest Mesa/Zink/Vulkan from repos)"); steps_fn+=(step_hwa_repo)
+else
+    steps_label+=("Hardware acceleration (pinned vendored Mesa/Zink/Vulkan)");  steps_fn+=(step_hwa_vendor)
+fi
 steps_label+=("Desktop environment(s)");               steps_fn+=(step_install_desktops)
 [ ${#SEL_APP[@]} -gt 0 ] && { steps_label+=("Applications"); steps_fn+=(step_install_apps); }
 [ "$SKIP_BIN" = 0 ]  && { steps_label+=("Helper scripts & launcher"); steps_fn+=(step_helpers); }
