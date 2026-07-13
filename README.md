@@ -227,7 +227,7 @@ Asset URLs are derived from the tags automatically (e.g. `v23.0.4-5` →
 
 ## 4. Start the desktop
 
-After the install completes, **restart Termux** (or `source ~/.bashrc`), then:
+After the install completes, start the desktop:
 
 ```bash
 desktop              # if only one is installed it launches; otherwise shows a menu

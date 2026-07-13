@@ -485,9 +485,10 @@ PULSE_WRAPPER
     cp "$SCRIPT_DIR/desktop.sh" ~/bin/desktop
     chmod +x ~/bin/desktop
 
-    # make sure ~/bin is on PATH
+    # make sure ~/bin is on PATH (for this session + future shells)
     grep -q 'export PATH="$HOME/bin:$PATH"' ~/.bashrc 2>/dev/null \
         || echo 'export PATH="$HOME/bin:$PATH"' >> ~/.bashrc
+    export PATH="$HOME/bin:$PATH"
 
     mkdir -p ~/Desktop ~/Downloads ~/Pictures ~/Temp
 }
@@ -756,7 +757,7 @@ echo
 echo -e "${G}╔══════════════════════════════════════════════════════════╗${N}"
 echo -e "${G}║ ✅  INSTALLATION COMPLETE                                ║${N}"
 echo -e "${G}╚══════════════════════════════════════════════════════════╝${N}\n"
-echo -e "${W}Restart Termux (or run:${C} source ~/.bashrc${W}), then start the desktop:${N}"
+echo -e "${W}Start the desktop:${N}"
 echo -e "   ${C}desktop${N}              ${GR}# pick from installed${N}"
 echo -e "   ${C}desktop xfce4${N}        ${GR}# launch directly${N}"
 echo -e "   ${C}desktop i3${N}           ${GR}# launch i3${N}"
