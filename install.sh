@@ -304,17 +304,20 @@ step_hwa_vendor() {
     apt-get install -y $APT_OPTS mesa-demos glmark2 vkmark
 }
 
-# Experimental: newest Mesa (26.x) from the main repo, which includes the Zink
-# driver (-Dgallium-drivers=…,zink), paired with the vendored Mali ICD shim.
-# mesa-zink is now obsolete (main mesa ships zink_dri.so), so it's removed first
-# to avoid a file-ownership conflict on that path. mesa 26.x Zink needs
-# VK_KHR_maintenance5 (a Vulkan 1.4 extension) — present on the Mali-G615
-# driver; if Zink still won't load, --vendored recovers. This path does NOT
-# touch step_hwa_vendor — the verified fallback stays intact.
+# Experimental: newest Mesa from the main repo (targets 26.1.4 when available;
+# repo may lag — the step logs the installed version). Includes Zink
+# (-Dgallium-drivers=…,zink), paired with the vendored Mali ICD shim.
+# mesa-zink is obsolete (main mesa ships zink_dri.so).
+# This path does NOT touch step_hwa_vendor — the verified fallback stays intact.
 step_hwa_mesa26() {
-    # Fresh install: no mesa-zink to purge. Mesa 26.x from main repo provides
-    # libGL/libEGL + zink_dri.so. Paired with vendored Mali ICD shim.
     apt install -y $APT_OPTS mesa
+    # Log installed version — helps confirm we got 26.1.x (not stale 26.0.x).
+    local _mver
+    _mver=$(dpkg -l mesa 2>/dev/null | awk '/^ii/{print $3}') || true
+    echo -e "${C}  Mesa installed: ${_mver:-unknown}${N}"
+    if [ -n "$_mver" ] && printf '%s\n' "$_mver" | grep -q '^26\.0\.'; then
+        echo -e "${Y}  NOTE: repo still has 26.0.x; Zink bugs may persist. --vendored is the safe fallback.${N}"
+    fi
     # Vendored Mali ICD shim (decoupled from Mesa version — pure manifest).
     if [ -f "$VULKAN_WRAPPER_DEB" ]; then
         dpkg -i "$VULKAN_WRAPPER_DEB"
@@ -325,6 +328,50 @@ step_hwa_mesa26() {
     fi
     apt-get --fix-broken install -y $APT_OPTS
     apt install -y $APT_OPTS mesa-demos $HWA_LIBS_MESA26 glmark2 vkmark
+    # --- Zink driver diagnostics (catches Zink load failures early) ---
+    local _zink="$PREFIX/lib/dri/zink_dri.so"
+    local _icd="$PREFIX/share/vulkan/icd.d/vulkan_wrapper_android.json"
+    local _diag="/tmp/termux-install-mesa26-diag.log"
+    : > "$_diag"
+    {
+        echo "=== mesa26 Zink diagnostics ==="
+        echo "Mesa version: ${_mver:-unknown}"
+        # Zink driver presence
+        if [ -f "$_zink" ]; then
+            echo "zink_dri.so: present ($(stat -c%s "$_zink" 2>/dev/null || echo '?') bytes)"
+        else
+            echo "zink_dri.so: MISSING at $_zink"
+        fi
+        # ICD manifest
+        if [ -f "$_icd" ]; then
+            echo "Mali ICD: present"
+            cat "$_icd"
+        else
+            echo "Mali ICD: MISSING at $_icd"
+        fi
+        # Quick glxinfo probe (verbose — shows driver selection + errors)
+        if command -v glxinfo >/dev/null 2>&1; then
+            echo "--- glxinfo (first 30 lines) ---"
+            LIBGL_DEBUG=verbose glxinfo 2>&1 | head -30
+            echo "--- renderer ---"
+            glxinfo 2>/dev/null | grep -i 'opengl renderer' || true
+        else
+            echo "glxinfo not available"
+        fi
+        echo "=== end diagnostics ==="
+    } >> "$_diag" 2>&1
+    echo -e "${C}  Diagnostics: $_diag${N}"
+    # Surface the renderer line + any Zink errors to the user
+    local _renderer _err
+    _renderer=$(grep -i 'opengl renderer' "$_diag" 2>/dev/null | head -1) || true
+    _err=$(grep -iE 'error|failed|zink.*not|llvmpipe' "$_diag" 2>/dev/null | head -5) || true
+    if [ -n "$_renderer" ]; then
+        echo -e "${C}  $_renderer${N}"
+    fi
+    if [ -n "$_err" ]; then
+        echo -e "${Y}  Potential issues (see $_diag for full output):${N}"
+        echo "$_err" | sed 's/^/    /'
+    fi
 }
 
 step_install_desktops() {
