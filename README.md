@@ -135,15 +135,19 @@ live output as it happens.
 
 ### HWA packages: latest from repos vs. pinned vendored
 
-By default the installer pulls the **latest coherent Mesa/Zink/Vulkan stack
-from the Termux repos** (`pkg`) in one transaction — the resolver picks
-mutually-compatible versions, so you get newer Zink/Mesa without manually
-matching version numbers across libraries. `mesa-demos` is included for
-`glxinfo` / `glxgears`.
+By default the installer takes **mesa-zink + mesa-zink-dev from the Termux
+repos** (latest, with upstream fixes) and **pairs them with the vendored
+`vulkan-wrapper-android` ICD shim** — the manifest that redirects the loader to
+the proprietary Mali driver. The repo's generic Vulkan loaders cannot see Mali,
+so without the shim you get "failed to load driver: zink" → llvmpipe. The shim
+is decoupled from Mesa's version (pure ICD manifest), so a newer repo mesa-zink
++ the vendored shim is a valid, accelerating pairing. `mesa-demos` is included
+for `glxinfo` / `glxgears`.
 
-If a repo update ever regresses, pass **`--vendored`** to fall back to the
-**pinned, known-working** `.deb` set shipped in `vendor/debs/` (offline,
-reproducible).
+If a repo mesa-zink ever regresses (e.g. demands a Vulkan extension your Mali
+driver doesn't expose), pass **`--vendored`** to fall back to the **fully
+pinned, known-working** `.deb` set shipped in `vendor/debs/` (offline,
+reproducible): both mesa-zink **and** the shim at their verified versions.
 
 To refresh those vendored debs from upstream (only relevant with `--vendored`):
 
@@ -188,13 +192,30 @@ native_cleaner        # clean caches
 
 ### Verify hardware acceleration
 
+After `./install.sh` finishes and you've started a session with `desktop`, run
+these **inside the desktop** to confirm the Zink → Mali chain is live:
+
 ```bash
-glmark2               # GL benchmark via Zink -> should be smooth, not 1 fps
-vkmark                # Vulkan benchmark
+glxinfo -B | grep -iE 'renderer|zink'   # renderer = Zink (...Mali...), NOT llvmpipe
+glmark2                                 # GL benchmark via Zink -> smooth, not 1 fps
+vkmark                                  # Vulkan benchmark
 ```
 
-If `glmark2` crawls, HWA isn't engaged — check that `desktop` (not the old
-`termux-xfce4` script) was used to start the session.
+If `glxinfo` shows `llvmpipe` or "failed to load driver: zink", HWA isn't
+engaged. Confirm the Mali ICD shim is pinned and present:
+
+```bash
+apt-mark showhold                       # should list vulkan-wrapper-android
+```
+
+Then recover to the verified-accelerated fallback:
+
+```bash
+./install.sh --vendored                 # pinned known-good mesa-zink + Mali shim
+```
+
+The most common cause of a dead session is starting it with the old
+`termux-xfce4` script instead of `desktop` — check that first.
 
 ---
 
@@ -410,7 +431,7 @@ Android Settings → Apps → Termux → Permissions → **Microphone**. Without
 | `install.sh` | The wizard. All config, registries and version tags live at its top. |
 | `desktop.sh` | Copied to `~/bin/desktop`. Generic Mali launcher (any installed DE). |
 | `vendor/bin/` | 7 helper scripts (`apphwa`, `desktop-help`, …) vendored from upstream. |
-| `vendor/debs/` | 3 HWA `.deb` packages (mesa-zink, vulkan-wrapper) — pinned fallback used by `--vendored`. |
+| `vendor/debs/` | 3 HWA `.deb` packages (mesa-zink, mesa-zink-dev, vulkan-wrapper-android). The wrapper is the Mali ICD shim used by **both** paths; mesa-zink/dev are the pinned fallback for `--vendored`. |
 | `assets/` | The device photo used in this README. |
 | `README.md` | This file. |
 

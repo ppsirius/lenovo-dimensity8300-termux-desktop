@@ -253,19 +253,31 @@ EOF
 # Latest coherent Mesa/Zink/Vulkan stack straight from the Termux repos.
 # NOTE: vulkan-wrapper-android is the upstream custom name and is NOT in the
 # repos — detect the standard Termux Vulkan loader instead.
+# Newest mesa-zink from repo PAIRED with the vendored Mali ICD shim.
+# The repo's generic Vulkan loaders cannot see the proprietary Mali driver, so
+# they yield "failed to load driver: zink" -> llvmpipe. The vendored
+# vulkan-wrapper-android is the ICD manifest that redirects the loader to Mali;
+# it is decoupled from Mesa's version (pure manifest), so repo mesa-zink +
+# vendored 25.0.0-2 wrapper is a valid pairing and is what makes this path
+# accelerate. step_hwa_vendor (--vendored) remains the untouched fallback.
 step_hwa_repo() {
-    local vkpkg=""
-    for vkpkg in vulkan-loader-android vulkan-loader-generic vulkan-wrapper-android; do
-        apt-cache show "$vkpkg" >/dev/null 2>&1 && break
-    done
-    if [ -z "$vkpkg" ] || ! apt-cache show "$vkpkg" >/dev/null 2>&1; then
-        echo "ERROR: no Vulkan loader package found in enabled repos." >&2
-        echo "       Hint: pass --vendored to use the pinned offline stack." >&2
-        return 1
+    # mesa-zink + dev: latest from repo (newest fixes/features).
+    apt-mark unhold mesa-zink mesa-zink-dev 2>/dev/null || true
+    apt install -y $APT_OPTS mesa-zink mesa-zink-dev
+    # vulkan-wrapper-android: vendored Mali ICD shim, held so future upgrades
+    # can't swap in a generic loader that loses Mali.
+    if [ -f "$VULKAN_WRAPPER_DEB" ]; then
+        apt-mark unhold vulkan-wrapper-android 2>/dev/null || true
+        dpkg -i "$VULKAN_WRAPPER_DEB"
+        apt-mark hold vulkan-wrapper-android 2>/dev/null || true
+    else
+        echo -e "${Y}WARN: $VULKAN_WRAPPER_DEB missing — Mali ICD shim not installed," >&2
+        echo -e "       acceleration will likely fail. Run: ./install.sh --sync${N}" >&2
     fi
-    echo "Using Vulkan loader package: $vkpkg"
-    apt install -y $APT_OPTS mesa-zink mesa-zink-dev "$vkpkg" \
-        mesa-demos $HWA_LIBS glmark2 vkmark
+    apt-get --fix-broken install -y $APT_OPTS
+    # HWA_LIBS includes vulkan-loader-generic (libvulkan.so) + the rest of the
+    # rendering deps; all latest from repo.
+    apt install -y $APT_OPTS mesa-demos $HWA_LIBS glmark2 vkmark
 }
 
 # Known-working fallback: pinned vendored debs (offline, reproducible).
