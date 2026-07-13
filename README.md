@@ -46,12 +46,13 @@ Install **all three** APKs from GitHub (turn off Play Protect temporarily if ins
 
 **Android tuning (stops Termux:X11 from being killed):**
 
-- **Android 11 & below**: open Termux once, run `termux-wake-lock`, grant "Background activity" when prompted.
+- **Android 9–11**: no phantom-process killer exists — just run `termux-wake-lock` once and grant "Background activity" when prompted.
 - **Android 12 / 13**: disable Phantom Processes — see https://github.com/EDLLT/TermuxDisablePhantomProcess
-- **Android 14+**: Settings → Developer options → enable *Disable Child Process Killer*.
+- **Android 14+ (incl. 15 & 16)**: Settings → Developer options → enable *Disable child process restrictions* (then reboot). This is the cleanest path on current Android; the adb one-liners are less reliable from 15 onward.
 - Still being killed? Apply https://dontkillmyapp.com/ to **both** Termux and Termux:X11.
 
 **Specs**: Android 9+, ~3 GB free RAM, ~5 GB free storage, ~1 GB of data.
+**Tested on**: Android 16 (Lenovo IdeaPad Pro 12.7, Dimensity 8300).
 
 ---
 
@@ -310,8 +311,10 @@ numbered list (1-5) to pick the distro. Warnings are shown inline.
 ### Audio / no sound
 
 The launcher starts PulseAudio and tries `module-aaudio-sink` first (Android's
-modern audio API), falling back to `module-sles-sink` if that fails. It then
-unmutes at 100%. If you hear nothing, work through these in order:
+modern audio API, reliable from Android 12+), falling back to
+`module-sles-sink` (OpenSL ES — works on older Android, but deprecated from
+Android 14+) if that fails. It then unmutes at 100%. If you hear nothing, work
+through these in order:
 
 **1. Diagnose** (run in Termux while the desktop is up):
 
@@ -368,9 +371,11 @@ Android's phantom process killer is the cause, not a Termux bug. Fix per version
 
 | Android | Fix |
 |---------|-----|
-| **14+** | Developer Options → **Disable child process restrictions** → reboot |
+| **15 / 16** | Developer Options → **Disable child process restrictions** → reboot. (The adb `device_config` / `settings` one-liners are increasingly locked down from 15 onward; the GUI toggle is the reliable path.) |
+| **14** | Developer Options → **Disable child process restrictions** → reboot |
 | **12L / 13** | `adb shell "settings put global settings_enable_monitor_phantom_procs false"` → reboot |
 | **12** | `adb shell "/system/bin/device_config put activity_manager max_phantom_processes 2147483647"` → reboot |
+| **9–11** | Nothing to do — no phantom-process killer exists. Just `termux-wake-lock` + battery optimization. |
 | **Rooted** (any) | `su -c "settings put global settings_enable_monitor_phantom_procs false"` → reboot |
 
 > ⚠️ A system update may reset these — reapply if signal 9 returns. Long-running
