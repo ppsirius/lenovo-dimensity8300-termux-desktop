@@ -124,7 +124,7 @@ spinner() {
         [ $((c % 50)) -eq 0 ] && [ -n "$log_file" ] && [ -s "$log_file" ] \
             && ctx=$(tail -1 "$log_file" 2>/dev/null | head -c 60)
         printf "\r\033[K ${Y}⏳${N} ${msg} ${C}${spin[$i]}${N}"
-        [ -n "$ctx" ] && printf " ${GR}${ctx//$'\n'/}${N}"
+        [ -n "$ctx" ] && printf " ${GR}%s${N}" "${ctx//$'\n'/}"
         read -t 0.1 2>/dev/null || true
     done
     wait "$pid"; local rc=$?
@@ -205,14 +205,23 @@ yesno() {
     r="${r:-$d}"; [[ "$r" =~ ^[Yy] ]]
 }
 
+# Pre-select a Termux mirror group so apt never prints "no mirror group
+# selected" and speed-tests every mirror worldwide. Called before any step
+# (so it also covers --no-deps runs). Respects an existing selection.
+setup_mirrors() {
+    local mdir="$PREFIX/etc/termux/mirrors" chosen="$PREFIX/etc/termux/chosen_mirrors"
+    [ -e "$chosen" ] && return 0
+    if [ -d "$mdir/$MIRROR_GROUP" ]; then
+        ln -s "$mdir/$MIRROR_GROUP" "$chosen"
+    elif [ -f "$mdir/default" ]; then
+        ln -s "$mdir/default" "$chosen"
+    else
+        echo -e "${Y}Could not pre-select a mirror group; run 'termux-change-repo' if apt is slow.${N}"
+    fi
+}
+
 # ============================ STEP FUNCTIONS =================================
 step_system() {
-    # Pre-select a mirror group before the first update — otherwise Termux
-    # prints "no mirror group selected" and speed-tests every mirror worldwide.
-    local mdir="$PREFIX/etc/termux/mirrors" chosen="$PREFIX/etc/termux/chosen_mirrors"
-    if [ -d "$mdir/$MIRROR_GROUP" ] && [ ! -e "$chosen" ]; then
-        ln -s "$mdir/$MIRROR_GROUP" "$chosen"
-    fi
     apt-get update -y
     apt-get upgrade -y $APT_OPTS
     # repair transient missing libs after upgrade (libpcre2.so, etc.)
@@ -556,6 +565,9 @@ else
         echo -e "${G}PRoot distro (from CLI):${N} ${SEL_PROOT}\n"
     fi
 fi
+
+# --- pre-select mirror group (always, so --no-deps runs are covered too) ---
+setup_mirrors
 
 # --- build the step list (accurate progress) ---
 STEP_FAILED=0

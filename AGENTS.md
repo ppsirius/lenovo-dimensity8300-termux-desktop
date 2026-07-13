@@ -13,3 +13,23 @@ proot containers, and vendored HWA debs — no runtime dependency on upstream.
   installer.
 - Keep the shell script POSIX-friendly; avoid bashisms where `dash` would break.
 - One function = one step; phases are listed in `steps_label`/`steps_fn` arrays.
+
+# Validation (run after EVERY shell edit)
+
+After any change to `install.sh`, `desktop.sh`, or anything in `vendor/bin/`,
+verify before finishing — no exceptions:
+
+```sh
+bash -n install.sh desktop.sh && bash install.sh --selftest
+```
+
+- `bash -n` — syntax check (catches the `printf`-format / quoting / heredoc
+  class of errors that only fire at runtime). Run it on every file you touched.
+- `bash install.sh --selftest` — validates the registries (`DE_*`/`APP_*`/
+  `PROOT_*` array lengths match) and that required vendored files exist.
+
+If `shellcheck` is installed, also run `shellcheck install.sh desktop.sh` for
+deeper static analysis (unused vars, unquoted expansions, SC2086). Treat
+`printf "...$var..."` (variable in format string) as a bug — pass via `%s`.
+
+Do not report a shell change as done until both checks pass.
